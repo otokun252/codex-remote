@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Codex Remote</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
+    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+    <link rel="manifest" href="site.webmanifest" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Codex Remote" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="theme-color" content="#ffffff" />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <button type="button" class="sidebar-scrim" id="sidebarScrim" aria-label="閉じる"></button>
+      <aside class="sidebar" aria-label="メニュー">
+        <nav class="primary-nav">
+          <button type="button" class="nav-command muted" id="workflowButton">投稿</button>
+          <button type="button" class="nav-command" id="newThread">新しく始める</button>
+          <button type="button" class="nav-command muted" id="searchButton">履歴</button>
+          <button type="button" class="nav-command muted" id="pluginsButton">プラグイン</button>
+          <button type="button" class="nav-command muted" id="automationsButton">自動化</button>
+        </nav>
+        <div class="thread-section">
+          <div class="section-title">最近の作業</div>
+          <input id="threadSearch" class="thread-search hidden" type="search" placeholder="作業を検索" />
+          <div id="threadList" class="thread-list"></div>
+        </div>
+        <button type="button" class="settings" id="settingsButton">設定</button>
+      </aside>
+
+      <section class="workspace">
+        <header class="titlebar">
+          <button type="button" class="mobile-toggle" id="mobileThreads">履歴</button>
+          <div class="title-stack">
+            <h1 id="threadTitle">Codex Remote</h1>
+            <p id="meta">接続中</p>
+          </div>
+          <div class="title-actions">
+            <button type="button" class="icon-button" id="previewButton" title="プレビュー" aria-label="プレビュー">□</button>
+            <button id="connect" type="button" class="icon-button" title="再接続" aria-label="再接続">↻</button>
+            <button type="button" class="icon-button" id="menuButton" title="メニュー" aria-label="メニュー">…</button>
+          </div>
+        </header>
+
+        <div class="content-grid">
+          <section class="conversation" aria-label="会話">
+            <div id="log" class="log" aria-live="polite"></div>
+            <section id="approval" class="approval hidden">
+              <div>
+                <strong>確認が必要です</strong>
+                <pre id="approvalText"></pre>
+              </div>
+              <div class="actions">
+                <button id="decline" type="button" class="secondary">拒否</button>
+                <button id="approve" type="button">許可</button>
+              </div>
+            </section>
+            <div id="runState" class="run-state" data-state="connecting" role="status" aria-live="polite">
+              <span class="run-state-dot" aria-hidden="true"></span>
+              <span id="runStateLabel">接続中</span>
+            </div>
+            <form id="composer" class="composer">
+              <input id="fileInput" class="hidden" type="file" accept="image/*" multiple />
+              <div id="attachments" class="attachments" aria-live="polite"></div>
+              <textarea id="prompt" rows="3" placeholder="Codexに頼みたいことを書く"></textarea>
+              <div class="composer-footer">
+                <div class="composer-left">
+                  <button type="button" class="ghost-button" id="addButton" title="画像を添付" aria-label="画像を添付">＋</button>
+                  <button type="button" class="ghost-button" id="imageButton" title="画像生成" aria-label="画像生成">画像</button>
+                  <button type="button" class="access-button" id="accessButton">フルアクセス⌄</button>
+                </div>
+                <div class="composer-right">
+                  <button type="button" class="stop-button" id="stopButton" title="停止" aria-label="停止">■</button>
+                  <button type="button" class="thinking-button" id="thinkingButton" title="思考量" aria-label="思考量"></button>
+                  <button type="button" id="modelButton" class="model-button">5.5 中⌄</button>
+                  <button type="button" class="voice-button" id="voiceButton" title="音声入力" aria-label="音声入力"></button>
+                  <button id="send" type="submit" class="send-button" title="送信" aria-label="送信">↑</button>
+                </div>
+              </div>
+              <div id="modelMenu" class="model-menu hidden" role="menu" aria-label="モデルと思考量">
+                <div class="model-menu-label">思考量</div>
+                <button type="button" class="model-menu-row" data-reasoning="低">低</button>
+                <button type="button" class="model-menu-row" data-reasoning="中">中<span class="checkmark">✓</span></button>
+                <button type="button" class="model-menu-row" data-reasoning="高">高</button>
+                <button type="button" class="model-menu-row" data-reasoning="非常に高">非常に高</button>
+                <div class="model-menu-separator"></div>
+                <button type="button" class="model-menu-row submenu-row" data-model-choice="gpt-5.5">GPT-5.5<span class="chevron">›</span></button>
+                <button type="button" class="model-menu-row submenu-row" data-model-choice="gpt-5.4">GPT-5.4<span class="chevron">›</span></button>
+                <button type="button" class="model-menu-row submenu-row" id="moreModelsButton">ほかのモデル<span class="chevron">›</span></button>
+              </div>
+            </form>
+          </section>
+
+          <aside class="artifact-panel" aria-label="結果">
+            <section class="panel-card">
+              <div class="panel-title">
+                <span id="artifactTitle">結果</span>
+                <button type="button" class="panel-close" id="closePanelButton" title="閉じる" aria-label="閉じる">×</button>
+              </div>
+              <div id="artifactList">
+                <button type="button" class="artifact-row" data-artifact="README.md">README.md</button>
+                <button type="button" class="artifact-row" data-artifact="AGENTS.md">AGENTS.md</button>
+              </div>
+              <div id="artifactPreview" class="artifact-preview hidden"></div>
+            </section>
+            <section class="panel-card">
+              <div class="panel-title">
+                <span>PC側</span>
+                <span>●</span>
+              </div>
+              <div id="terminalList">
+                <button type="button" class="terminal-row" id="statusButton">状態</button>
+              </div>
+            </section>
+            <section class="panel-card">
+              <div class="panel-title">調べる</div>
+              <button type="button" class="source-row" id="webSearchButton">Webで確認</button>
+            </section>
+          </aside>
+        </div>
+      </section>
+    </main>
+
+    <script src="/main.js"></script>
+  </body>
+</html>

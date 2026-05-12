@@ -1,0 +1,49 @@
+{
+  "name": "codex-remote",
+  "version": "1.0.0",
+  "description": "Local-first phone bridge for controlling a user's own PC Codex session.",
+  "private": false,
+  "type": "commonjs",
+  "scripts": {
+    "version:codex": "codex --version",
+    "help:remote-control": "codex remote-control --help",
+    "server:ws": "mkdir -p .codex-home-ws && CODEX_HOME=$PWD/.codex-home-ws codex app-server --listen ws://127.0.0.1:45213",
+    "probe:ws": "node scripts/probe-ws.js",
+    "phone": "node scripts/start-phone.js --tunnel",
+    "phone:tunnel": "node scripts/start-phone.js --tunnel",
+    "phone:product": "node scripts/start-product.js",
+    "phone:install-startup": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-startup-task.ps1",
+    "setup:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-windows.ps1",
+    "update:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/update-windows.ps1",
+    "x:login": "node scripts/x-publisher.js login",
+    "x:post": "node scripts/x-publisher.js post",
+    "x:article": "node scripts/x-article.js publish",
+    "note:draft": "node scripts/note-draft.js save",
+    "setup:cloudflared": "node scripts/ensure-cloudflared.js",
+    "test": "node --test scripts/*.test.js",
+    "check": "node --check scripts/start-phone.js && node --check scripts/start-product.js && node --check scripts/session-store.js && node --check scripts/probe-ws.js && node --check scripts/cloudflared-tunnel.js && node --check scripts/ensure-cloudflared.js && node --check scripts/x-publisher.js && node --check scripts/x-article.js && node --check scripts/note-draft.js && python -m py_compile scripts/x-post-uia.py && python -m py_compile scripts/note-draft-uia.py && node --check public/main.js && node --check public/sw.js",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs"
+  },
+  "keywords": [
+    "codex",
+    "remote-control",
+    "app-server",
+    "websocket",
+    "phone-bridge",
+    "local-first"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@openai/codex": "^0.130.0",
+    "playwright": "^1.59.1",
+    "vitepress": "^1.6.4",
+    "ws": "^8.20.0"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4",
+    "qrcode-terminal": "^0.12.0"
+  }
+}

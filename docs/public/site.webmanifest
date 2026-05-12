@@ -1,0 +1,18 @@
+{
+  "name": "Codex Remote",
+  "short_name": "Codex Remote",
+  "description": "Local-first Codex app-server and token-protected phone bridge.",
+  "start_url": "/codex-remote/",
+  "scope": "/codex-remote/",
+  "display": "standalone",
+  "background_color": "#15151a",
+  "theme_color": "#15151a",
+  "icons": [
+    {
+      "src": "/codex-remote/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

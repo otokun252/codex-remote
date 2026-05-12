@@ -1,0 +1,31 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+
+const { bridgeKeyForRequest, shouldDisposeIdleBridge, shouldPromoteBridgeKey } = require("./bridge-state");
+
+test("new thread bridge requests share the startup URL bridge", () => {
+  assert.equal(bridgeKeyForRequest("", "a"), "new:shared");
+  assert.equal(bridgeKeyForRequest(null, "b"), "new:shared");
+  assert.equal(bridgeKeyForRequest("", "a"), bridgeKeyForRequest("", "b"));
+});
+
+test("existing thread bridge requests keep the thread id as the shared key", () => {
+  assert.equal(bridgeKeyForRequest("thread-123", "ignored"), "thread-123");
+});
+
+test("idle bridges stay alive by default so browser reconnect can resume", () => {
+  assert.equal(shouldDisposeIdleBridge({ clientCount: 0, ready: true }), false);
+  assert.equal(shouldDisposeIdleBridge({ clientCount: 1, ready: true }), false);
+  assert.equal(shouldDisposeIdleBridge({ clientCount: 0, ready: false }), false);
+});
+
+test("idle bridges can still be explicitly disposed", () => {
+  assert.equal(shouldDisposeIdleBridge({ clientCount: 0, ready: true, keepAlive: false }), true);
+  assert.equal(shouldDisposeIdleBridge({ clientCount: 1, ready: true, keepAlive: false }), false);
+});
+
+test("new bridge keys promote to the real thread id once ready", () => {
+  assert.equal(shouldPromoteBridgeKey({ bridgeKey: "new:a", threadId: "thread-123" }), true);
+  assert.equal(shouldPromoteBridgeKey({ bridgeKey: "thread-123", threadId: "thread-123" }), false);
+  assert.equal(shouldPromoteBridgeKey({ bridgeKey: "new:a", threadId: "" }), false);
+});

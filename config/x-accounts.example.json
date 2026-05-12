@@ -1,0 +1,10 @@
+{
+  "main": {
+    "handle": "@your_main_account",
+    "chromeProfile": "Default"
+  },
+  "alt": {
+    "handle": "@your_alt_account",
+    "chromeProfile": "Profile 1"
+  }
+}

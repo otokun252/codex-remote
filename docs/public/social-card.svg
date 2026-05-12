@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">Codex Remote</title>
+  <desc id="desc">Control your own PC Codex from your phone.</desc>
+  <rect width="1200" height="630" fill="#f6f3ea"/>
+  <rect x="78" y="78" width="1044" height="474" rx="34" fill="#15151a"/>
+  <rect x="138" y="140" width="250" height="350" rx="28" fill="#f6f3ea"/>
+  <path d="M178 205h168v18H178zm0 52h126v18H178zm0 52h150v18H178z" fill="#15151a"/>
+  <path d="M445 268h150a70 70 0 0 1 0 140H472" fill="none" stroke="#41d6a4" stroke-width="34" stroke-linecap="round"/>
+  <circle cx="624" cy="268" r="31" fill="#ffb347"/>
+  <text x="700" y="270" fill="#f6f3ea" font-family="Arial, Helvetica, sans-serif" font-size="58" font-weight="700">Codex Remote</text>
+  <text x="700" y="348" fill="#d7d2c3" font-family="Arial, Helvetica, sans-serif" font-size="34">localhost PC bridge</text>
+  <text x="700" y="398" fill="#d7d2c3" font-family="Arial, Helvetica, sans-serif" font-size="34">token-protected public URL</text>
+</svg>
