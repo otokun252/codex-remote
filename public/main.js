@@ -140,7 +140,7 @@ const accessModes = [
 ];
 
 function updateModelButton() {
-  modelButton.textContent = `${selectedModelLabel} ${selectedReasoning}`;
+  modelButton.textContent = `${selectedModelLabel} / ${selectedReasoning}`;
   for (const row of modelMenu.querySelectorAll("[data-reasoning]")) {
     const active = row.dataset.reasoning === selectedReasoning;
     row.classList.toggle("active", active);
@@ -173,7 +173,7 @@ function selectReasoning(value) {
   localStorage.setItem("codexPhoneReasoning", value);
   updateModelButton();
   closeModelMenu();
-  addStatus(`インテリジェンスを ${value} に設定しました。`);
+  addStatus(`思考量を ${value} に設定しました。`);
 }
 
 function selectModel(model) {
@@ -629,20 +629,20 @@ function ensureComposerActionButtons() {
   if (!followUpButton) {
     followUpButton = document.createElement("button");
     followUpButton.type = "button";
-    followUpButton.className = "secondary-action-button";
+    followUpButton.className = "secondary-action-button tool-button";
     followUpButton.id = "followUpButton";
     followUpButton.textContent = "追記";
     followUpButton.title = "続けて送る";
-    right.insertBefore(followUpButton, sendButton);
+    right.insertBefore(followUpButton, stopButton || modelButton || sendButton);
   }
   if (!interruptButton) {
     interruptButton = document.createElement("button");
     interruptButton.type = "button";
-    interruptButton.className = "secondary-action-button interrupt";
+    interruptButton.className = "secondary-action-button interrupt tool-button";
     interruptButton.id = "interruptButton";
     interruptButton.textContent = "割込";
     interruptButton.title = "いまの処理を止めて送る";
-    right.insertBefore(interruptButton, sendButton);
+    right.insertBefore(interruptButton, stopButton || modelButton || sendButton);
   }
   if (followUpButton && !followUpButton.dataset.bound) {
     followUpButton.addEventListener("click", () => sendComposerMessage("followup"));
@@ -2082,10 +2082,10 @@ stopButton?.addEventListener("click", () => {
 accessButton.addEventListener("click", () => {
   const index = accessModes.findIndex((candidate) => candidate.label === accessMode.label);
   accessMode = accessModes[(index + 1) % accessModes.length];
-  accessButton.textContent = `${accessMode.label}⌄`;
+  accessButton.textContent = accessMode.label;
   addStatus(`権限を ${accessMode.label} に切り替えました。次の送信から反映します。`);
 });
-thinkingButton.addEventListener("click", toggleModelMenu);
+thinkingButton?.addEventListener("click", toggleModelMenu);
 modelButton.addEventListener("click", toggleModelMenu);
 voiceButton.addEventListener("click", startVoiceInput);
 modelMenu.addEventListener("click", (event) => {
@@ -2106,7 +2106,7 @@ modelMenu.addEventListener("click", (event) => {
 });
 document.addEventListener("click", (event) => {
   if (modelMenu.classList.contains("hidden")) return;
-  if (modelMenu.contains(event.target) || modelButton.contains(event.target) || thinkingButton.contains(event.target)) return;
+  if (modelMenu.contains(event.target) || modelButton.contains(event.target) || thinkingButton?.contains(event.target)) return;
   closeModelMenu();
 });
 statusButton.addEventListener("click", showStatus);
