@@ -17,6 +17,10 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 class SessionStore {
   constructor(filePath) {
     this.filePath = filePath;
@@ -46,9 +50,41 @@ class SessionStore {
 
   save() {
     fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
-    const tempPath = `${this.filePath}.${process.pid}.tmp`;
-    fs.writeFileSync(tempPath, JSON.stringify(this.state, null, 2), { mode: 0o600 });
-    fs.renameSync(tempPath, this.filePath);
+    const tempPath = `${this.filePath}.${process.pid}.${Date.now()}.tmp`;
+    const body = JSON.stringify(this.state, null, 2);
+    try {
+      fs.writeFileSync(tempPath, body, { mode: 0o600 });
+    } catch (error) {
+      console.warn(`[session-store] state temp write skipped: ${error.message}`);
+      return false;
+    }
+
+    const attempts = 6;
+    let lastError = null;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      try {
+        fs.renameSync(tempPath, this.filePath);
+        return true;
+      } catch (error) {
+        lastError = error;
+        if (!["EPERM", "EACCES", "EBUSY"].includes(error.code)) break;
+        sleepSync(50 * (attempt + 1));
+      }
+    }
+
+    try {
+      fs.writeFileSync(this.filePath, body, { mode: 0o600 });
+      fs.rmSync(tempPath, { force: true });
+      return true;
+    } catch (error) {
+      try {
+        fs.rmSync(tempPath, { force: true });
+      } catch {
+        // ignore cleanup failure
+      }
+      console.warn(`[session-store] state save skipped: ${(lastError || error).message}`);
+      return false;
+    }
   }
 
   ensureDevice(deviceId = "") {

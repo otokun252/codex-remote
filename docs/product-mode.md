@@ -70,7 +70,7 @@ After pulling new code or changing UI files, restart `npm run phone:product`. Th
 
 The first QR open stores the token and a generated device id in the phone browser. After the user adds the PWA to the home screen, the app can reopen `/` on the same fixed domain and restore the previous thread from the local bridge state.
 
-The bridge stores recent device, session, task, log, and artifact metadata under `tmp/phone-state/state.json`. This file is intentionally local-only and should not be committed.
+The bridge stores recent device, session, task, log, and artifact metadata outside the repository by default. On Windows, the default is `%LOCALAPPDATA%\CodexRemote\phone-state\state.json`. Override it with `PHONE_STATE_DIR` only when needed. This state is local-only and should not be committed.
 
 Generated images and screenshots are served through token-protected `/api/file/raw` URLs. When a new image or screenshot is registered, connected phones receive an `artifact` WebSocket event and refresh the preview.
 

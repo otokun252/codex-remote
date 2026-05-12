@@ -76,6 +76,7 @@ connection.txt
 
 - `.env` をGitHubに入れない
 - `PHONE_TOKEN` を他人に見せない
+- セッション状態は既定で `%LOCALAPPDATA%\CodexRemote\phone-state\state.json` に保存される
 - 顧客ごとに別PC、別token、別固定URLを使う
 - PC本体が完全に停止している間はCodex Remoteも動かない
 - 一時URLの `trycloudflare.com` は商品用に使わない

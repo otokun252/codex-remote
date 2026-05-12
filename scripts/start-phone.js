@@ -58,7 +58,12 @@ const bindHost = process.env.PHONE_BIND_HOST || "127.0.0.1";
 const tokenPath = path.join(root, ".phone-token");
 const uploadDir = path.join(root, ".uploads");
 const screenCaptureDir = path.join(root, "tmp", "screen-captures");
-const store = new SessionStore(path.join(root, "tmp", "phone-state", "state.json"));
+const stateRoot =
+  process.env.PHONE_STATE_DIR ||
+  (process.platform === "win32" && process.env.LOCALAPPDATA
+    ? path.join(process.env.LOCALAPPDATA, "CodexRemote", "phone-state")
+    : path.join(root, "tmp", "phone-state"));
+const store = new SessionStore(path.join(stateRoot, "state.json"));
 const bridges = new Map();
 const historyLimit = 80;
 let managedCodexChild = null;
