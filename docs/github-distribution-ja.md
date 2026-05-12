@@ -37,6 +37,7 @@ PHONE_TOKEN=replace-with-a-long-random-secret
 PHONE_PUBLIC_URL=https://your-fixed-domain.example.com
 PHONE_UI_PORT=45214
 PHONE_BIND_HOST=127.0.0.1
+PHONE_AUTO_PORT=1
 ```
 
 固定URLで起動:
@@ -44,6 +45,9 @@ PHONE_BIND_HOST=127.0.0.1
 ```powershell
 npm run phone:product
 ```
+
+通常起動では、古いプロセスが残ってポートが塞がっていても、自動で空きポートを探します。
+固定URLで使う場合は、スマホの入口を勝手に変えないため、`PHONE_UI_PORT` が塞がっていると起動を止めます。
 
 ## 更新
 

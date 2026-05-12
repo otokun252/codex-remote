@@ -37,10 +37,12 @@ loadEnvFile(path.join(root, ".env"));
 
 const codexBin = path.join(root, "node_modules", ".bin", "codex");
 const codexJsBin = path.join(root, "node_modules", "@openai", "codex", "bin", "codex.js");
-const uiPort = Number(process.env.PHONE_UI_PORT || 45214);
-const codexPort = Number(process.env.CODEX_APP_SERVER_PORT || 45213);
+const requestedUiPort = Number(process.env.PHONE_UI_PORT || 45214);
+const requestedCodexPort = Number(process.env.CODEX_APP_SERVER_PORT || 45213);
 const codexSocketPath = process.env.CODEX_APP_SERVER_SOCK || "";
-const codexUrl = process.env.CODEX_APP_SERVER_URL || (codexSocketPath ? "ws://codex-app-server/rpc" : `ws://127.0.0.1:${codexPort}`);
+let uiPort = requestedUiPort;
+let codexPort = requestedCodexPort;
+let codexUrl = process.env.CODEX_APP_SERVER_URL || (codexSocketPath ? "ws://codex-app-server/rpc" : `ws://127.0.0.1:${codexPort}`);
 const shouldStartCodexServer = !process.env.CODEX_APP_SERVER_URL && !codexSocketPath;
 const workdir = process.env.CODEX_WORKDIR || root;
 const model = process.env.CODEX_MODEL || "gpt-5.4";
@@ -51,6 +53,7 @@ const publicTunnelEnabled =
   /^(1|true|yes)$/i.test(String(process.env.PHONE_PUBLIC_TUNNEL || ""));
 const productMode = /^(1|true|yes)$/i.test(String(process.env.PHONE_PRODUCT_MODE || ""));
 const stablePublicUrl = String(process.env.PHONE_PUBLIC_URL || "").trim();
+const autoPortEnabled = !/^(0|false|no)$/i.test(String(process.env.PHONE_AUTO_PORT || ""));
 const bindHost = process.env.PHONE_BIND_HOST || "127.0.0.1";
 const tokenPath = path.join(root, ".phone-token");
 const uploadDir = path.join(root, ".uploads");
@@ -105,6 +108,54 @@ function waitForReady() {
     };
     tick();
   });
+}
+
+function canListen(port, host = "127.0.0.1") {
+  return new Promise((resolve) => {
+    const tester = net.createServer();
+    tester.once("error", () => resolve(false));
+    tester.once("listening", () => {
+      tester.close(() => resolve(true));
+    });
+    tester.listen(port, host);
+  });
+}
+
+async function findAvailablePort(startPort, host = "127.0.0.1", attempts = 40) {
+  for (let offset = 0; offset < attempts; offset += 1) {
+    const candidate = startPort + offset;
+    if (await canListen(candidate, host)) return candidate;
+  }
+  throw new Error(`No available port found from ${startPort} to ${startPort + attempts - 1}`);
+}
+
+async function configureRuntimePorts() {
+  if (!autoPortEnabled && (productMode || stablePublicUrl)) {
+    return;
+  }
+
+  if (shouldStartCodexServer && !codexSocketPath && !process.env.CODEX_APP_SERVER_URL) {
+    const availableCodexPort = await findAvailablePort(requestedCodexPort, "127.0.0.1");
+    if (availableCodexPort !== requestedCodexPort) {
+      console.warn(
+        `[ports] Codex app-server port ${requestedCodexPort} is busy; using ${availableCodexPort} for this run.`,
+      );
+    }
+    codexPort = availableCodexPort;
+    codexUrl = `ws://127.0.0.1:${codexPort}`;
+  }
+
+  const uiHostForProbe = bindHost === "0.0.0.0" || bindHost === "::" ? "127.0.0.1" : bindHost;
+  const availableUiPort = await findAvailablePort(requestedUiPort, uiHostForProbe);
+  if (availableUiPort !== requestedUiPort) {
+    if (productMode || stablePublicUrl) {
+      throw new Error(
+        `PHONE_UI_PORT ${requestedUiPort} is busy. Fixed URL mode must keep the configured local port stable.`,
+      );
+    }
+    console.warn(`[ports] Phone bridge port ${requestedUiPort} is busy; using ${availableUiPort} for this run.`);
+  }
+  uiPort = availableUiPort;
 }
 
 function createUpstreamWebSocket() {
@@ -1373,6 +1424,7 @@ function bindBrowser(browser, phoneToken, threadId, deviceId = "") {
 
 async function main() {
   const phoneToken = getToken();
+  await configureRuntimePorts();
   managedCodexChild = shouldStartCodexServer ? startCodexServer() : null;
   let tunnel = null;
   if (shouldStartCodexServer) {

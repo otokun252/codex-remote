@@ -108,6 +108,7 @@ PHONE_PUBLIC_URL=https://your-fixed-domain.example.com
 PHONE_UI_PORT=45214
 PHONE_BIND_HOST=127.0.0.1
 CODEX_MODEL=gpt-5.4
+PHONE_AUTO_PORT=1
 ```
 
 起動:
@@ -115,6 +116,9 @@ CODEX_MODEL=gpt-5.4
 ```powershell
 npm run phone:product
 ```
+
+通常起動では、古いプロセスが残ってポートが塞がっていても、自動で空きポートを探します。
+固定URLで使う本番モードでは、スマホの入口を勝手に変えないため、`PHONE_UI_PORT` が塞がっている場合は起動を止めます。
 
 ## X/note機能
 

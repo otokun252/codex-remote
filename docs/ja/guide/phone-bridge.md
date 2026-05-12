@@ -32,7 +32,9 @@ Quick TunnelのURLは再起動で変わることがあります。顧客向け�
 PHONE_PRODUCT_MODE=1
 PHONE_TOKEN=replace-with-a-long-random-secret
 PHONE_PUBLIC_URL=https://your-fixed-domain.example.com
+PHONE_UI_PORT=45214
 PHONE_BIND_HOST=127.0.0.1
+PHONE_AUTO_PORT=1
 ```
 
 起動:
@@ -40,4 +42,6 @@ PHONE_BIND_HOST=127.0.0.1
 ```powershell
 npm run phone:product
 ```
+
+Quick Tunnelの通常起動では、前回の起動がポートを塞いでいても空きポートへ逃がします。固定URL運用では `PHONE_UI_PORT` を安定させるため、そのポートが塞がっている場合は起動を止めます。
 

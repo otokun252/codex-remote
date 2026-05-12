@@ -18,7 +18,9 @@ For a product release, put a stable reverse proxy, Cloudflare Named Tunnel, or d
 PHONE_PRODUCT_MODE=1
 PHONE_TOKEN=replace-with-a-long-random-secret
 PHONE_PUBLIC_URL=https://your-fixed-domain.example.com
+PHONE_UI_PORT=45214
 PHONE_BIND_HOST=127.0.0.1
+PHONE_AUTO_PORT=1
 ```
 
 Start the product bridge:
@@ -28,6 +30,8 @@ npm run phone:product
 ```
 
 The generated `connection.html`, `connection.txt`, and `connection-qr-latest.png` will point at `PHONE_PUBLIC_URL` with the token attached. Updating the UI or restarting the bridge can keep the same QR as long as the domain and token stay the same.
+
+In personal Quick Tunnel mode, Codex Remote can automatically move to an open local port when an old process is still holding the default port. In product mode with a fixed public URL, the phone bridge port is treated as stable: if `PHONE_UI_PORT` is already in use, startup stops instead of silently changing the phone entrypoint.
 
 ## Updating
 
