@@ -44,6 +44,7 @@ const codexUrl = process.env.CODEX_APP_SERVER_URL || (codexSocketPath ? "ws://co
 const shouldStartCodexServer = !process.env.CODEX_APP_SERVER_URL && !codexSocketPath;
 const workdir = process.env.CODEX_WORKDIR || root;
 const model = process.env.CODEX_MODEL || "gpt-5.4";
+const codexLaunchMode = process.env.CODEX_LAUNCH_MODE || "app-server";
 const historySyncEnabled = isHistorySyncEnabled(process.env);
 const publicTunnelEnabled =
   process.argv.includes("--tunnel") ||
@@ -204,7 +205,9 @@ const appServerClient = new AppServerRpcClient();
 
 function startCodexServer() {
   const command = process.platform === "win32" ? process.execPath : codexBin;
-  const args = process.platform === "win32" ? [codexJsBin, "app-server", "--listen", codexUrl] : ["app-server", "--listen", codexUrl];
+  const codexArgs =
+    codexLaunchMode === "remote-control" ? ["remote-control"] : ["app-server", "--listen", codexUrl];
+  const args = process.platform === "win32" ? [codexJsBin, ...codexArgs] : codexArgs;
   const child = spawn(command, args, {
     cwd: root,
     env: {

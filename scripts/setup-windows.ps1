@@ -8,7 +8,7 @@ Set-Location $Root
 
 function Require-Command($Name, $InstallMessage) {
   if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
-    throw "$Name が見つかりません。$InstallMessage"
+    throw "$Name was not found. $InstallMessage"
   }
 }
 
@@ -17,8 +17,8 @@ Write-Host "Codex Remote Windows setup" -ForegroundColor Cyan
 Write-Host "Repository: $Root"
 Write-Host ""
 
-Require-Command "node" "Node.js LTS を https://nodejs.org/ からインストールしてください。"
-Require-Command "npm" "Node.js LTS を入れ直してください。"
+Require-Command "node" "Install Node.js LTS from https://nodejs.org/."
+Require-Command "npm" "Reinstall Node.js LTS from https://nodejs.org/."
 
 $nodeVersion = (& node --version)
 Write-Host "Node: $nodeVersion"
@@ -44,4 +44,5 @@ if (-not (Test-Path ".env") -and (Test-Path ".env.product.example")) {
 Write-Host ""
 Write-Host "Setup complete." -ForegroundColor Green
 Write-Host "Start with: start.bat"
+Write-Host "Optional memory: start-memory.bat"
 Write-Host "Update later with: update.bat"

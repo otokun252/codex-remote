@@ -1,5 +1,7 @@
 # Codex Remote
 
+Codex CLIの `codex remote-control` を、スマホから扱いやすくするためのリポジトリです。
+
 スマホから、自分のPCで動いているCodexを操作するためのWebアプリです。
 
 スマホは操作画面だけです。実行本体、ローカルファイル、Chrome、画像、スクリーンショット、Codexの作業は、すべて利用者本人のPC側で動きます。
@@ -12,13 +14,14 @@
 - スマホからフォルダや成果物を確認する
 - PWAとしてホーム画面に追加する
 - X、X Articles、noteのローカル投稿ワークフローを使う
+- agentmemoryを使ってCodexにローカル長期記憶を追加する
 - GitHubから更新する
 
 ## 重要な考え方
 
-このリポジトリを使う人は、それぞれ自分のPCに入れて使います。
+このリポジトリを使う人は、それぞれ自分のPCに入れて構築します。
 
-あなたのPCやアカウントを他人が使う形ではありません。
+あなたのPCやアカウントを他人が使う形ではありません。GitHubのリンクは、他の人にあなたの実行中URLを渡すためではなく、その人が自分のPCに同じ仕組みを作るための入口です。
 
 ```text
 スマホ
@@ -54,6 +57,25 @@ start.bat
 QRコードとURLが表示されます。スマホで読み込んでください。
 
 起動中はPC側の起動画面を閉じないでください。PC側が止まると、スマホ側からも操作できません。
+
+## Codex remote-control について
+
+このプロジェクトは、Codex CLIの `remote-control` 系の使い方をスマホから扱いやすくするための構成です。
+
+確認:
+
+```powershell
+npm run help:remote-control
+npm run codex:remote-control
+```
+
+現在のスマホBridgeは、安定してスマホUIへ接続するためにローカルのCodex WebSocket互換接続を使います。`codex remote-control` を直接使いたい場合は、`.env` で次を試せます。
+
+```env
+CODEX_LAUNCH_MODE=remote-control
+```
+
+ただし環境によってはCodex公式側のremote-control登録が失敗することがあります。その場合は既定の `CODEX_LAUNCH_MODE=app-server` に戻してください。
 
 ## スマホで使う流れ
 
@@ -114,6 +136,24 @@ copy config\x-accounts.example.json config\x-accounts.local.json
 ```
 
 `config/x-accounts.local.json` はGitHubに公開しないでください。
+
+## agentmemory
+
+agentmemoryを使うと、Codexが過去の作業や判断を思い出しやすくなります。
+
+起動:
+
+```powershell
+start-memory.bat
+```
+
+確認:
+
+```powershell
+npm run memory:health
+```
+
+詳しくは [docs/agentmemory-ja.md](docs/agentmemory-ja.md) を見てください。
 
 ## GitHubに公開しないもの
 

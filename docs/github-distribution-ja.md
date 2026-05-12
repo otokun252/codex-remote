@@ -1,6 +1,8 @@
-# GitHub配布ガイド
+# GitHub構築ガイド
 
-このリポジトリは、各ユーザーが自分のPCでCodex Remoteを動かすための配布物です。
+このリポジトリは、各ユーザーが自分のPCでCodex Remoteを動かすための構築用リポジトリです。
+
+このGitHub URLを渡しても、あなたのPCやアカウントを相手が使う形にはなりません。相手は自分のPCにcloneして、自分のCodexで起動します。
 
 利用者はあなたのPCやアカウントを使いません。各自が自分のPCでBridgeを起動し、自分のCodexログイン、自分のChrome、自分のローカルファイルを使います。
 
@@ -73,6 +75,22 @@ copy config\x-accounts.example.json config\x-accounts.local.json
 ```
 
 `config/x-accounts.local.json` はGitに入りません。
+
+## agentmemoryを使う場合
+
+agentmemoryは、Codexにローカル長期記憶を追加する任意機能です。
+
+```powershell
+start-memory.bat
+```
+
+起動確認:
+
+```powershell
+npm run memory:health
+```
+
+CodexのMCP設定例は [agentmemory連携](agentmemory-ja.md) を見てください。
 
 ## 公開してよいもの
 

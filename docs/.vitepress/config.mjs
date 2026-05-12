@@ -31,6 +31,7 @@ export default defineConfig({
               { text: "GitHub Distribution", link: "/github-distribution-ja" },
               { text: "Phone Bridge", link: "/guide/phone-bridge" },
               { text: "Product Mode", link: "/product-mode" },
+              { text: "agentmemory", link: "/agentmemory-ja" },
               { text: "Protocol Notes", link: "/guide/protocol" },
               { text: "Security", link: "/guide/security" },
               { text: "X/note Fallback", link: "/x-posting-fallback" },
@@ -55,6 +56,7 @@ export default defineConfig({
             items: [
               { text: "GitHub Distribution", link: "/github-distribution-ja" },
               { text: "Phone Bridge", link: "/ja/guide/phone-bridge" },
+              { text: "agentmemory", link: "/agentmemory-ja" },
               { text: "Protocol Notes", link: "/ja/guide/protocol" },
               { text: "Security", link: "/ja/guide/security" },
             ],

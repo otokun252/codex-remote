@@ -19,6 +19,8 @@ features:
     details: The default start flow opens a Cloudflare tunnel and prints only the public QR URL.
   - title: Local execution
     details: Codex, local files, browser sessions, images, and screenshots stay on the user's PC.
+  - title: agentmemory
+    details: Optional local memory server for giving Codex persistent project memory.
   - title: Update by GitHub
     details: Users can run update.bat to pull the latest repository version without touching Git commands.
   - title: Public-safe
