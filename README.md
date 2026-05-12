@@ -1,4 +1,4 @@
-# Codex Remote
+﻿# Codex Remote
 
 Codex CLIの `codex remote-control` を、スマホから扱いやすくするためのリポジトリです。
 
@@ -71,7 +71,7 @@ npm run codex:remote-control
 
 現在のスマホBridgeは、安定してスマホUIへ接続するためにローカルのCodex WebSocket互換接続を使います。`codex remote-control` を直接使いたい場合は、`.env` で次を試せます。
 
-```env
+```text
 CODEX_LAUNCH_MODE=remote-control
 ```
 
@@ -101,7 +101,7 @@ Quick TunnelのURLは再起動で変わることがあります。商品とし�
 
 `.env` に例のように設定します。
 
-```env
+```text
 PHONE_PRODUCT_MODE=1
 PHONE_TOKEN=replace-with-a-long-random-secret
 PHONE_PUBLIC_URL=https://your-fixed-domain.example.com
@@ -117,8 +117,28 @@ PHONE_AUTO_PORT=1
 npm run phone:product
 ```
 
+日常利用では監視付き起動を使います。Bridgeが落ちた場合、自動で再起動します。
+
+```powershell
+start-product.bat
+```
+
+固定URLの `.env` は次のコマンドでも作れます。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\configure-fixed-url.ps1 -PublicUrl https://your-fixed-domain.example.com
+```
+
+Windowsログオン時に自動起動する場合:
+
+```powershell
+npm run phone:install-startup
+```
+
 通常起動では、古いプロセスが残ってポートが塞がっていても、自動で空きポートを探します。
 固定URLで使う本番モードでは、スマホの入口を勝手に変えないため、`PHONE_UI_PORT` が塞がっている場合は起動を止めます。
+
+詳しい固定URL手順は [docs/fixed-url-ja.md](docs/fixed-url-ja.md) を見てください。
 
 ## X/note機能
 

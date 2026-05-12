@@ -16,6 +16,8 @@
     "phone": "node scripts/start-phone.js --tunnel",
     "phone:tunnel": "node scripts/start-phone.js --tunnel",
     "phone:product": "node scripts/start-product.js",
+    "phone:supervise": "node scripts/supervise-product.js",
+    "phone:configure-fixed-url": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/configure-fixed-url.ps1",
     "phone:install-startup": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-startup-task.ps1",
     "setup:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-windows.ps1",
     "update:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/update-windows.ps1",
@@ -25,9 +27,9 @@
     "note:draft": "node scripts/note-draft.js save",
     "setup:cloudflared": "node scripts/ensure-cloudflared.js",
     "test": "node --test scripts/*.test.js",
-    "check": "node --check scripts/start-phone.js && node --check scripts/start-product.js && node --check scripts/session-store.js && node --check scripts/probe-ws.js && node --check scripts/cloudflared-tunnel.js && node --check scripts/ensure-cloudflared.js && node --check scripts/agentmemory-health.js && node --check scripts/x-publisher.js && node --check scripts/x-article.js && node --check scripts/note-draft.js && python -m py_compile scripts/x-post-uia.py && python -m py_compile scripts/note-draft-uia.py && node --check public/main.js && node --check public/sw.js",
+    "check": "node --check scripts/start-phone.js && node --check scripts/start-product.js && node --check scripts/supervise-product.js && node --check scripts/build-docs.js && node --check scripts/session-store.js && node --check scripts/probe-ws.js && node --check scripts/cloudflared-tunnel.js && node --check scripts/ensure-cloudflared.js && node --check scripts/agentmemory-health.js && node --check scripts/x-publisher.js && node --check scripts/x-article.js && node --check scripts/note-draft.js && python -m py_compile scripts/x-post-uia.py && python -m py_compile scripts/note-draft-uia.py && node --check public/main.js && node --check public/sw.js",
     "docs:dev": "vitepress dev docs",
-    "docs:build": "vitepress build docs",
+    "docs:build": "node scripts/build-docs.js",
     "docs:preview": "vitepress preview docs"
   },
   "keywords": [

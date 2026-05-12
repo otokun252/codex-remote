@@ -1,4 +1,4 @@
-# Phone Bridge
+﻿# Phone Bridge
 
 Phone Bridgeは、スマホから利用者本人のPCで動くCodexを操作するための入口です。
 
@@ -28,7 +28,7 @@ URLには `?token=...` が含まれます。他人に見せないでください
 
 Quick TunnelのURLは再起動で変わることがあります。顧客向けには固定URLを設定します。
 
-```env
+```text
 PHONE_PRODUCT_MODE=1
 PHONE_TOKEN=replace-with-a-long-random-secret
 PHONE_PUBLIC_URL=https://your-fixed-domain.example.com
@@ -41,6 +41,12 @@ PHONE_AUTO_PORT=1
 
 ```powershell
 npm run phone:product
+```
+
+日常利用では自動復旧つきの起動を使います。
+
+```powershell
+start-product.bat
 ```
 
 Quick Tunnelの通常起動では、前回の起動がポートを塞いでいても空きポートへ逃がします。固定URL運用では `PHONE_UI_PORT` を安定させるため、そのポートが塞がっている場合は起動を止めます。

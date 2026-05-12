@@ -1,4 +1,4 @@
-# Phone Bridge
+﻿# Phone Bridge
 
 The phone bridge lets a phone control the Codex session running on the user's own PC.
 
@@ -28,7 +28,7 @@ The printed URL includes `?token=...`. Keep that URL private. To stop the bridge
 
 Quick Tunnel URLs can change when the bridge restarts. For customer use, configure a fixed public URL:
 
-```env
+```text
 PHONE_PRODUCT_MODE=1
 PHONE_TOKEN=replace-with-a-long-random-secret
 PHONE_PUBLIC_URL=https://your-fixed-domain.example.com
@@ -43,11 +43,17 @@ Then run:
 npm run phone:product
 ```
 
+For daily use with automatic restart:
+
+```powershell
+start-product.bat
+```
+
 Quick Tunnel mode can move to an open local port when the previous run left a port busy. Fixed URL mode keeps `PHONE_UI_PORT` stable and stops if that port is occupied.
 
 ## Useful Environment Variables
 
-```env
+```text
 PHONE_UI_PORT=45214
 PHONE_BIND_HOST=127.0.0.1
 PHONE_TOKEN=choose-your-own-token

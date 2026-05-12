@@ -1,4 +1,4 @@
-# GitHub構築ガイド
+﻿# GitHub構築ガイド
 
 このリポジトリは、各ユーザーが自分のPCでCodex Remoteを動かすための構築用リポジトリです。
 
@@ -31,7 +31,7 @@ start.bat
 
 継続利用や商品提供では、利用者ごとに固定URLを設定します。
 
-```env
+```text
 PHONE_PRODUCT_MODE=1
 PHONE_TOKEN=replace-with-a-long-random-secret
 PHONE_PUBLIC_URL=https://your-fixed-domain.example.com
@@ -44,6 +44,24 @@ PHONE_AUTO_PORT=1
 
 ```powershell
 npm run phone:product
+```
+
+日常利用では監視付き起動を使います。
+
+```powershell
+start-product.bat
+```
+
+固定URL用の `.env` は次でも作れます。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\configure-fixed-url.ps1 -PublicUrl https://your-fixed-domain.example.com
+```
+
+Windowsログオン時に自動起動する場合:
+
+```powershell
+npm run phone:install-startup
 ```
 
 通常起動では、古いプロセスが残ってポートが塞がっていても、自動で空きポートを探します。
