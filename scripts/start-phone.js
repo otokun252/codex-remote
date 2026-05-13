@@ -860,6 +860,38 @@ function runLocalProcess(command, args, options = {}) {
   });
 }
 
+async function gitDiffForFile(baseDir, relativePath) {
+  const target = safeRelativePath(relativePath, baseDir);
+  if (!target || !isSafeBrowsablePath(target, baseDir)) {
+    throw new Error("file path is not allowed");
+  }
+  const normalized = relativeFromBase(target, baseDir);
+  const result = await runLocalProcess("git", ["-C", baseDir, "diff", "--no-ext-diff", "--", normalized]);
+  let diff = result.stdout;
+  if (!diff && fs.existsSync(target) && fs.statSync(target).isFile() && isTextLikePath(target)) {
+    try {
+      await runLocalProcess("git", ["-C", baseDir, "ls-files", "--error-unmatch", "--", normalized]);
+    } catch {
+      const text = fs.readFileSync(target, "utf8");
+      const lines = text.split(/\r?\n/);
+      diff = [
+        `diff --git a/${normalized} b/${normalized}`,
+        "new file mode 100644",
+        "index 0000000..0000000",
+        "--- /dev/null",
+        `+++ b/${normalized}`,
+        `@@ -0,0 +1,${lines.length} @@`,
+        ...lines.map((line) => `+${line}`),
+      ].join("\n");
+    }
+  }
+  return {
+    path: normalized,
+    diff: diff.slice(0, 120_000),
+    truncated: diff.length > 120_000,
+  };
+}
+
 async function runWorkflowScript(scriptName, scriptArgs) {
   return runLocalProcess(process.execPath, [path.join(root, "scripts", scriptName), ...scriptArgs]);
 }
@@ -1063,18 +1095,26 @@ function summarizeItem(item) {
     };
   }
   if (item.type === "agentMessage") return { type: "assistant", text: stripUiDirectives(item.text) };
-  if (item.type === "commandExecution") return { type: "status", text: `$ ${item.command}` };
-  if (item.type === "fileChange") return { type: "status", text: `file changes: ${item.status}` };
+  if (item.type === "commandExecution") {
+    const event = commandEventFromItem(item);
+    return { type: "status", text: eventText(event), event };
+  }
+  if (item.type === "fileChange") {
+    const event = fileChangeEventFromItem(item);
+    return { type: "status", text: eventText(event), event };
+  }
   return null;
 }
 
 function summarizeLiveItem(item, phase = "completed") {
   if (!item) return null;
   if (item.type === "commandExecution") {
-    return phase === "started" ? `$ ${item.command}` : null;
+    const event = commandEventFromItem(item, phase);
+    return phase === "started" ? { text: eventText(event), event } : null;
   }
   if (item.type === "fileChange") {
-    return `file changes: ${item.status}`;
+    const event = fileChangeEventFromItem(item, phase);
+    return { text: eventText(event), event };
   }
   return null;
 }
@@ -1098,6 +1138,135 @@ function previewText(value, limit = 72) {
   const compact = String(value || "").replace(/\s+/g, " ").trim();
   if (!compact) return "";
   return compact.length > limit ? `${compact.slice(0, limit)}...` : compact;
+}
+
+function pickFirstString(...values) {
+  return values.map((value) => String(value || "").trim()).find(Boolean) || "";
+}
+
+function commandEventFromItem(item = {}, phase = "completed") {
+  const command = pickFirstString(item.command, item.cmd, item.params?.command);
+  const cwd = pickFirstString(item.cwd, item.workingDirectory, item.params?.cwd);
+  const status = pickFirstString(item.status, item.state, phase);
+  const exitCode = item.exitCode ?? item.exit_code ?? item.result?.exitCode ?? null;
+  return {
+    kind: "commandExecution",
+    phase,
+    command,
+    cwd,
+    status,
+    exitCode,
+    durationMs: item.durationMs ?? item.duration_ms ?? null,
+    stdout: previewText(item.stdout || item.output || item.result?.stdout || "", 400),
+    stderr: previewText(item.stderr || item.error || item.result?.stderr || "", 400),
+  };
+}
+
+function collectPathStrings(value, paths = new Set()) {
+  if (!value || paths.size >= 40) return paths;
+  if (typeof value === "string") {
+    const clean = value.trim();
+    if (clean && clean.length < 500 && !/[\r\n]/.test(clean) && /[\\/]|\.[a-z0-9]{1,12}$/i.test(clean)) {
+      paths.add(clean);
+    }
+    return paths;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectPathStrings(item, paths);
+    return paths;
+  }
+  if (typeof value === "object") {
+    for (const [key, nested] of Object.entries(value)) {
+      if (/^(path|file|filepath|filePath|relativePath|oldPath|newPath)$/i.test(key)) collectPathStrings(nested, paths);
+      else if (/^(files|changes|diffs|edits)$/i.test(key)) collectPathStrings(nested, paths);
+    }
+  }
+  return paths;
+}
+
+function fileDiffDescriptor(relativePath, baseDir = root) {
+  const target = safeRelativePath(relativePath, baseDir);
+  if (!target || !isSafeBrowsablePath(target, baseDir)) return null;
+  const normalized = relativeFromBase(target, baseDir);
+  return {
+    path: normalized,
+    url: `/api/file/diff?path=${encodeURIComponent(normalized)}&cwd=${encodeURIComponent(baseDir)}`,
+  };
+}
+
+function fileChangeEventFromItem(item = {}, phase = "completed", baseDir = root) {
+  const status = pickFirstString(item.status, item.state, phase);
+  const paths = [...collectPathStrings(item)]
+    .map((candidate) => fileDiffDescriptor(candidate, baseDir))
+    .filter(Boolean);
+  const uniquePaths = Array.from(new Map(paths.map((descriptor) => [descriptor.path, descriptor])).values());
+  return {
+    kind: "fileChange",
+    phase,
+    status,
+    summary: uniquePaths.length ? `${uniquePaths.length} file(s) changed` : status || "file change",
+    files: uniquePaths.map((descriptor) => descriptor.path),
+    diffs: uniquePaths.slice(0, 20),
+  };
+}
+
+function eventText(event) {
+  if (!event) return "";
+  if (event.kind === "commandExecution") {
+    const prefix = event.phase === "started" ? "running" : event.status || "completed";
+    return event.command ? `$ ${event.command} (${prefix})` : `command ${prefix}`;
+  }
+  if (event.kind === "fileChange") {
+    return event.files?.length ? `file changes: ${event.files.join(", ")}` : `file changes: ${event.status}`;
+  }
+  return "";
+}
+
+function summarizeApproval(requestMsg = {}) {
+  const params = requestMsg.params || {};
+  if (requestMsg.method === "item/commandExecution/requestApproval") {
+    const command = pickFirstString(params.command, params.cmd, params.item?.command);
+    const cwd = pickFirstString(params.cwd, params.workingDirectory, params.item?.cwd);
+    return {
+      kind: "commandExecution",
+      title: "Command approval",
+      text: command ? `Run command: ${command}` : "Run requested command",
+      command,
+      cwd,
+      risk: pickFirstString(params.reason, params.description),
+    };
+  }
+  if (requestMsg.method === "item/fileChange/requestApproval") {
+    const event = fileChangeEventFromItem(params.item || params, "approval");
+    return {
+      kind: "fileChange",
+      title: "File change approval",
+      text: event.files.length ? `Apply file changes: ${event.files.join(", ")}` : "Apply requested file changes",
+      files: event.files,
+      diffs: event.diffs,
+      status: event.status,
+    };
+  }
+  return {
+    kind: "approval",
+    title: "Approval requested",
+    text: pickFirstString(params.reason, params.description, requestMsg.method),
+  };
+}
+
+function extractRateQuotaInfo(auth, config) {
+  const sources = [
+    auth?.quota,
+    auth?.rateLimits,
+    auth?.rate_limits,
+    auth?.limits,
+    auth?.usage,
+    config?.quota,
+    config?.rateLimits,
+    config?.rate_limits,
+    config?.usage,
+  ].filter((value) => value !== undefined && value !== null);
+  return sources.length ? sources[0] : null;
 }
 
 class SharedBridge {
@@ -1282,16 +1451,16 @@ class SharedBridge {
       }
 
       if (msg.method === "item/started") {
-        const text = summarizeLiveItem(msg.params.item, "started");
-        if (text) this.emit("status", { text });
+        const liveEvent = summarizeLiveItem(msg.params.item, "started");
+        if (liveEvent) this.emit("status", liveEvent);
         return;
       }
 
       if (msg.method === "item/completed") {
         const entry = summarizeItem(msg.params.item);
         if (entry && entry.type !== "user") this.appendHistory(entry);
-        const text = summarizeLiveItem(msg.params.item, "completed");
-        if (text) this.emit("status", { text });
+        const liveEvent = summarizeLiveItem(msg.params.item, "completed");
+        if (liveEvent) this.emit("status", liveEvent);
         this.emit("event", { event: msg });
         return;
       }
@@ -1308,7 +1477,7 @@ class SharedBridge {
 
       if (msg.method && msg.method.endsWith("/requestApproval")) {
         this.pendingApproval = msg;
-        this.emit("approval", { request: msg });
+        this.emit("approval", { request: msg, summary: summarizeApproval(msg) });
         return;
       }
 
@@ -1411,6 +1580,7 @@ class SharedBridge {
     if (!requestMsg || !requestMsg.id || !requestMsg.method) return;
     this.pendingApproval = null;
     const accept = decision === "accept";
+    const summary = summarizeApproval(requestMsg);
     let result;
     if (requestMsg.method === "item/commandExecution/requestApproval") {
       result = { decision: accept ? "accept" : "decline" };
@@ -1420,7 +1590,10 @@ class SharedBridge {
       result = accept ? { decision: "accept" } : { decision: "decline" };
     }
     this.upstream.send(JSON.stringify({ id: requestMsg.id, result }));
-    this.emit("status", { text: accept ? "\u627f\u8a8d\u3057\u307e\u3057\u305f" : "\u62d2\u5426\u3057\u307e\u3057\u305f" });
+    this.emit("status", {
+      text: `${accept ? "\u627f\u8a8d\u3057\u307e\u3057\u305f" : "\u62d2\u5426\u3057\u307e\u3057\u305f"}: ${summary.text}`,
+      approval: { decision: accept ? "accept" : "decline", summary },
+    });
   }
   stop({ preserveQueue = false, reason = "stop" } = {}) {
     const queuedCount = this.turnQueue.length;
@@ -1670,11 +1843,14 @@ async function main() {
         appServerRequest("getAuthStatus", {}),
         appServerRequest("config/read", { includeLayers: false, cwd: workdir }),
       ]);
+      const authValue = auth.status === "fulfilled" ? auth.value : null;
+      const configValue = config.status === "fulfilled" ? config.value : null;
       sendJson(res, 200, {
         workdir,
         model,
-        auth: auth.status === "fulfilled" ? auth.value : null,
-        config: config.status === "fulfilled" ? config.value : null,
+        auth: authValue,
+        config: configValue,
+        rateQuota: extractRateQuotaInfo(authValue, configValue),
         statusErrors: [auth, config]
           .filter((result) => result.status === "rejected")
           .map((result) => result.reason.message),
@@ -1974,6 +2150,22 @@ async function main() {
       }
       res.writeHead(200, { "content-type": mimeForPath(target), "cache-control": "no-store" });
       fs.createReadStream(target).pipe(res);
+      return;
+    }
+    if (url.pathname === "/api/file/diff") {
+      if (!requireToken(url, phoneToken, res)) return;
+      const baseDir = resolveArtifactBaseFromUrl(url) || artifactBaseDir(await resolveThreadCwd(url.searchParams.get("thread")));
+      const relativePath = url.searchParams.get("path");
+      if (!relativePath) {
+        sendJson(res, 400, { error: "path is required" });
+        return;
+      }
+      try {
+        const result = await gitDiffForFile(baseDir, relativePath);
+        sendJson(res, 200, { ...result, baseDir });
+      } catch (error) {
+        sendJson(res, 500, { error: error.message });
+      }
       return;
     }
     if (url.pathname === "/api/codex-generated-image") {

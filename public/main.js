@@ -43,6 +43,13 @@ const approveButton = document.querySelector("#approve");
 const declineButton = document.querySelector("#decline");
 let workflowButton = document.querySelector("#workflowButton");
 const defaultSendButtonLabel = sendButton ? sendButton.innerHTML : "";
+const statusChip = document.createElement("button");
+statusChip.type = "button";
+statusChip.className = "status-chip hidden";
+statusChip.title = "状態";
+statusChip.setAttribute("aria-label", "状態");
+statusChip.addEventListener("click", showStatus);
+document.querySelector(".title-actions")?.prepend(statusChip);
 
 const params = new URLSearchParams(location.search);
 const token = params.get("token") || localStorage.getItem("codexPhoneToken") || "";
@@ -90,6 +97,7 @@ let reconnectTimer = null;
 let reconnectAttempts = 0;
 let intentionalClose = false;
 let pendingFollowUpPreview = "";
+let lastStatusChipText = "";
 const recentArtifactPreviews = new Map();
 
 const runStateText = {
@@ -729,6 +737,156 @@ function previewText(value, limit = 72) {
   return compact.length > limit ? `${compact.slice(0, limit)}...` : compact;
 }
 
+function labelForEventType(type) {
+  if (type === "commandExecution") return "コマンド";
+  if (type === "fileChange") return "ファイル変更";
+  if (type === "turn") return "ターン";
+  if (type === "artifact") return "成果物";
+  return "作業";
+}
+
+function structuredEventFromHistoryEntry(entry) {
+  if (!entry || entry.type !== "status") return null;
+  if (entry.event) return normalizeWorkEvent(entry.event);
+  const text = String(entry.text || "").trim();
+  if (/^\$\s+/.test(text)) {
+    return { type: "commandExecution", phase: "started", title: "コマンド実行", detail: text.replace(/^\$\s+/, ""), state: "running" };
+  }
+  const fileChange = text.match(/^file changes:\s*(.+)$/i);
+  if (fileChange) {
+    return { type: "fileChange", phase: "completed", title: "ファイル変更", detail: fileChange[1], state: "done" };
+  }
+  return null;
+}
+
+function structuredEventFromBridgeEvent(event) {
+  const method = event?.method || "";
+  const item = event?.params?.item;
+  if (item?.type === "commandExecution") {
+    return {
+      type: "commandExecution",
+      phase: method.includes("started") ? "started" : "completed",
+      title: method.includes("started") ? "コマンド開始" : "コマンド完了",
+      detail: item.command || "",
+      state: method.includes("started") ? "running" : "done",
+    };
+  }
+  if (item?.type === "fileChange") {
+    return {
+      type: "fileChange",
+      phase: "completed",
+      title: "ファイル変更",
+      detail: item.status || item.path || "",
+      state: "done",
+    };
+  }
+  if (method === "turn/completed") {
+    return { type: "turn", phase: "completed", title: "ターン完了", detail: event.params?.turnId || "", state: "done" };
+  }
+  return null;
+}
+
+function normalizeWorkEvent(event) {
+  if (!event) return null;
+  const type = event.type || event.kind || "";
+  if (type === "commandExecution") {
+    const state = event.phase === "started" || event.status === "running" ? "running" : "done";
+    return {
+      ...event,
+      type,
+      state,
+      title: event.title || (state === "running" ? "コマンド開始" : "コマンド完了"),
+      detail: event.detail || event.command || event.stdout || event.stderr || "コマンドを実行しました",
+      meta: event.cwd || (event.exitCode !== null && event.exitCode !== undefined ? `exit ${event.exitCode}` : event.meta || ""),
+    };
+  }
+  if (type === "fileChange") {
+    return {
+      ...event,
+      type,
+      state: "done",
+      title: event.title || "ファイル変更",
+      detail: event.detail || event.summary || event.files?.join(", ") || event.status || "ファイルを変更しました",
+    };
+  }
+  return { ...event, type, title: event.title || labelForEventType(type), detail: event.detail || event.text || "" };
+}
+
+function addWorkLogCard(event) {
+  event = normalizeWorkEvent(event);
+  if (!event) return null;
+  statusGroup = null;
+  const el = document.createElement("article");
+  el.className = `entry work-log ${event.state || ""}`.trim();
+
+  const avatar = document.createElement("div");
+  avatar.className = "entry-avatar";
+  avatar.textContent = "↯";
+
+  const body = document.createElement("div");
+  body.className = "entry-body work-log-card";
+
+  const top = document.createElement("div");
+  top.className = "work-log-top";
+  const title = document.createElement("strong");
+  title.textContent = event.title || labelForEventType(event.type);
+  const chip = document.createElement("span");
+  chip.className = "work-log-chip";
+  chip.textContent = labelForEventType(event.type);
+  top.append(title, chip);
+
+  const detail = document.createElement("div");
+  detail.className = "work-log-detail";
+  detail.textContent = event.detail || "詳細なし";
+
+  body.append(top, detail);
+  if (event.meta) {
+    const metaLine = document.createElement("small");
+    metaLine.textContent = event.meta;
+    body.appendChild(metaLine);
+  }
+  if (Array.isArray(event.diffs) && event.diffs.length) {
+    const diffList = document.createElement("div");
+    diffList.className = "work-log-actions";
+    for (const diff of event.diffs.slice(0, 4)) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = diff.path || "差分";
+      button.addEventListener("click", () => showDiff(diff));
+      diffList.appendChild(button);
+    }
+    body.appendChild(diffList);
+  }
+
+  const tools = document.createElement("div");
+  tools.className = "entry-tools";
+  el.append(avatar, body, tools);
+  log.appendChild(el);
+  log.scrollTop = log.scrollHeight;
+  return body;
+}
+
+async function showDiff(diff) {
+  if (!diff?.url) return;
+  try {
+    const result = await apiGet(diff.url);
+    showRightPanel();
+    artifactTitle.textContent = "差分";
+    artifactList.classList.add("artifact-browser-list");
+    artifactPreview.className = "artifact-preview plain-preview";
+    artifactPreview.classList.remove("hidden");
+    artifactPreview.innerHTML = `
+      <div class="artifact-preview-header">
+        <div class="artifact-preview-title">${escapeHtml(result.path || diff.path || "diff")}</div>
+        <button type="button" class="artifact-preview-close" data-preview-close>閉じる</button>
+      </div>
+      <pre><code>${escapeHtml(result.diff || "差分はありません")}</code></pre>
+    `;
+  } catch (error) {
+    addEntry("error", `差分を読めませんでした: ${error.message}`);
+  }
+}
+
 function sendComposerMessage(type = "prompt") {
   const text = promptInput.value.trim();
   if ((!text && !pendingFiles.length) || !ws || ws.readyState !== WebSocket.OPEN) return false;
@@ -786,7 +944,11 @@ function rememberArtifactPreview(path, source = "") {
 function renderHistory(history) {
   log.replaceChildren();
   statusGroup = null;
-  for (const entry of history || []) addEntry(entry.type, entry.text, entry.attachments || []);
+  for (const entry of history || []) {
+    const event = structuredEventFromHistoryEntry(entry);
+    if (event) addWorkLogCard(event);
+    else addEntry(entry.type, entry.text, entry.attachments || []);
+  }
 }
 
 function historySignature(history = []) {
@@ -1098,8 +1260,7 @@ function initialsFor(value) {
 function addPluginRow(plugin, state) {
   const name = plugin.name || plugin.title || plugin.id || "Plugin";
   const detail = plugin.description || plugin.summary || plugin.id || state || "";
-  const row = document.createElement("button");
-  row.type = "button";
+  const row = document.createElement("article");
   row.className = "artifact-row plugin-row";
 
   const icon = document.createElement("span");
@@ -1118,11 +1279,45 @@ function addPluginRow(plugin, state) {
   const label = document.createElement("strong");
   label.textContent = name;
   const small = document.createElement("small");
-  small.textContent = [state, detail].filter(Boolean).join(" · ");
+  small.textContent = [humanPluginState(state), detail].filter(Boolean).join(" · ");
   text.append(label, small);
-  row.append(icon, text);
+
+  const actions = document.createElement("div");
+  actions.className = "plugin-actions";
+  const primary = document.createElement("button");
+  primary.type = "button";
+  primary.textContent = state === "available" ? "有効化を依頼" : "使う";
+  primary.addEventListener("click", () => {
+    promptInput.value = `${promptInput.value}${promptInput.value ? "\n" : ""}${name} プラグインをこの作業で使えるか確認して、必要な手順を進めて。`;
+    promptInput.focus();
+    closeRightPanel();
+  });
+  const info = document.createElement("button");
+  info.type = "button";
+  info.textContent = "詳細";
+  info.addEventListener("click", () => {
+    artifactPreview.className = "artifact-preview";
+    artifactPreview.classList.remove("hidden");
+    artifactPreview.innerHTML = `
+      <div class="artifact-preview-header">
+        <div class="artifact-preview-title">${escapeHtml(name)}</div>
+        <button type="button" class="artifact-preview-close" data-preview-close>閉じる</button>
+      </div>
+      <p>${escapeHtml(detail || "説明なし")}</p>
+      <p>状態: ${escapeHtml(humanPluginState(state))}</p>
+    `;
+  });
+  actions.append(primary, info);
+  row.append(icon, text, actions);
   artifactList.appendChild(row);
   return row;
+}
+
+function humanPluginState(state) {
+  if (state === "enabled") return "有効";
+  if (state === "installed") return "インストール済み";
+  if (state === "available") return "利用可能";
+  return state || "";
 }
 
 function previewProxyUrl(targetUrl) {
@@ -1163,11 +1358,15 @@ async function capturePcScreen() {
 }
 
 function showPreviewTools(defaultUrl = localStorage.getItem("codexPreviewUrl") || "http://127.0.0.1:3000") {
-  clearPanel("プレビュー");
+  clearPanel("スマホ検証");
   artifactList.replaceChildren();
 
   const launcher = document.createElement("section");
-  launcher.className = "preview-launcher";
+  launcher.className = "preview-launcher phone-check-panel";
+
+  const previewTitle = document.createElement("div");
+  previewTitle.className = "phone-check-title";
+  previewTitle.textContent = "プレビュー";
 
   const input = document.createElement("input");
   input.type = "url";
@@ -1180,15 +1379,15 @@ function showPreviewTools(defaultUrl = localStorage.getItem("codexPreviewUrl") |
 
   const open = document.createElement("button");
   open.type = "button";
-  open.textContent = "表示";
+  open.textContent = "スマホ表示";
 
   const ask = document.createElement("button");
   ask.type = "button";
-  ask.textContent = "Codexに起動依頼";
+  ask.textContent = "起動を依頼";
 
   const capture = document.createElement("button");
   capture.type = "button";
-  capture.textContent = "PC画面";
+  capture.textContent = "PCスクショ取得";
 
   const quickPorts = document.createElement("div");
   quickPorts.className = "preview-ports";
@@ -1203,8 +1402,12 @@ function showPreviewTools(defaultUrl = localStorage.getItem("codexPreviewUrl") |
     quickPorts.appendChild(button);
   }
 
+  const captureNote = document.createElement("div");
+  captureNote.className = "phone-check-note";
+  captureNote.textContent = "プレビューはスマホ内で確認、PCスクショは今のデスクトップ画面を取得します。";
+
   controls.append(open, ask, capture);
-  launcher.append(input, controls, quickPorts);
+  launcher.append(previewTitle, input, controls, quickPorts, captureNote);
   artifactList.appendChild(launcher);
 
   artifactPreview.className = "artifact-preview preview-frame-wrap";
@@ -1310,6 +1513,50 @@ function showToolError(name, error) {
   addPanelRow("読み込みに失敗しました", error.message);
   addEntry("error", `${name}: ${error.message}`);
   document.body.classList.remove("show-sidebar");
+}
+
+function readableApproval(request) {
+  const params = request?.params || {};
+  const tool = params.toolName || params.tool || request?.method?.replace(/\/requestApproval$/, "") || "操作";
+  const command = params.command || params.cmd || params.arguments?.command || "";
+  const cwd = params.cwd || params.workdir || params.arguments?.cwd || "";
+  const reason = params.reason || params.justification || params.arguments?.justification || "";
+  const filePath = params.path || params.file || params.arguments?.path || "";
+  const title = command ? "コマンド実行の確認" : filePath ? "ファイル操作の確認" : "操作の確認";
+  const lines = [
+    { label: "対象", value: tool },
+    { label: "内容", value: command || filePath || previewText(JSON.stringify(params), 110) },
+    { label: "場所", value: cwd },
+    { label: "理由", value: reason },
+  ].filter((line) => line.value);
+  return { title, lines, raw: params };
+}
+
+function renderApprovalRequest(request) {
+  const summary = readableApproval(request);
+  approvalText.replaceChildren();
+  const title = document.createElement("div");
+  title.className = "approval-summary-title";
+  title.textContent = summary.title;
+  approvalText.appendChild(title);
+  for (const line of summary.lines) {
+    const row = document.createElement("div");
+    row.className = "approval-summary-row";
+    const label = document.createElement("span");
+    label.textContent = line.label;
+    const value = document.createElement("strong");
+    value.textContent = line.value;
+    row.append(label, value);
+    approvalText.appendChild(row);
+  }
+  const details = document.createElement("details");
+  details.className = "approval-raw";
+  const detailsSummary = document.createElement("summary");
+  detailsSummary.textContent = "詳細データ";
+  const pre = document.createElement("pre");
+  pre.textContent = JSON.stringify(summary.raw, null, 2);
+  details.append(detailsSummary, pre);
+  approvalText.appendChild(details);
 }
 
 async function showPlugins() {
@@ -1524,8 +1771,14 @@ function addAutomationCard(automation) {
   const row = document.createElement("article");
   row.className = "automation-card";
 
+  const header = document.createElement("div");
+  header.className = "automation-header";
   const title = document.createElement("strong");
   title.textContent = automation.name;
+  const badge = document.createElement("span");
+  badge.className = `automation-status ${automation.status === "ACTIVE" ? "active" : "paused"}`;
+  badge.textContent = automation.status === "ACTIVE" ? "有効" : "一時停止";
+  header.append(title, badge);
 
   const details = document.createElement("small");
   details.textContent = [
@@ -1551,22 +1804,22 @@ function addAutomationCard(automation) {
 
   const save = document.createElement("button");
   save.type = "button";
-  save.textContent = "Save time";
+  save.textContent = "時刻保存";
   save.disabled = time.disabled;
   save.addEventListener("click", () => updateAutomation(automation.id, { dailyTime: time.value }));
 
   const toggle = document.createElement("button");
   toggle.type = "button";
-  toggle.textContent = automation.status === "ACTIVE" ? "Pause" : "Resume";
+  toggle.textContent = automation.status === "ACTIVE" ? "一時停止" : "再開";
   toggle.addEventListener("click", () => updateAutomation(automation.id, { status: automation.status === "ACTIVE" ? "PAUSED" : "ACTIVE" }));
 
   const edit = document.createElement("button");
   edit.type = "button";
-  edit.textContent = "Open";
+  edit.textContent = "編集";
   edit.addEventListener("click", () => showAutomationEditor(automation));
 
   controls.append(time, save, toggle, edit);
-  row.append(title, details, promptPreview, controls);
+  row.append(header, details, promptPreview, controls);
   artifactList.appendChild(row);
 }
 
@@ -1682,10 +1935,10 @@ function showAutomationEditor(automation) {
 async function updateAutomation(id, patch) {
   try {
     await apiPost("/api/automation/update", { id, ...patch });
-    addStatus("Automation updated");
+    addStatus("自動化を更新しました。");
     await showAutomations();
   } catch (error) {
-    addEntry("error", `Automation update failed: ${error.message}`);
+    addEntry("error", `自動化の更新に失敗しました: ${error.message}`);
   }
 }
 
@@ -1815,12 +2068,65 @@ function startVoiceInput() {
   recognition.start();
 }
 
+function quotaFromStatus(result) {
+  const auth = result?.auth || {};
+  return auth.quota || auth.rateLimits || auth.limits || auth.usage || result?.config?.quota || null;
+}
+
+function compactQuotaText(quota) {
+  if (!quota) return "";
+  if (typeof quota !== "object") return String(quota);
+  const entries = Object.entries(quota).filter(([, value]) => value !== null && value !== undefined);
+  const remaining = entries.find(([key]) => /remain|left|available/i.test(key));
+  const reset = entries.find(([key]) => /reset|window/i.test(key));
+  const primary = remaining || entries[0];
+  if (!primary) return "";
+  const value = typeof primary[1] === "object" ? JSON.stringify(primary[1]) : String(primary[1]);
+  const suffix = reset ? ` / ${typeof reset[1] === "object" ? JSON.stringify(reset[1]) : String(reset[1])}` : "";
+  return `${primary[0]} ${value}${suffix}`;
+}
+
+function updateStatusChip(result) {
+  const quota = quotaFromStatus(result);
+  const activeBridge = (result?.bridges || []).find((bridge) => bridge.active);
+  const queued = (result?.bridges || []).reduce((sum, bridge) => sum + Number(bridge.queued || 0), 0);
+  const auth = result?.auth || {};
+  const parts = [];
+  if (activeBridge) parts.push("処理中");
+  else if (result?.bridges?.length) parts.push("待機中");
+  if (queued) parts.push(`待ち${queued}`);
+  const quotaText = compactQuotaText(quota);
+  if (quotaText) parts.push(quotaText);
+  else if (auth.planType || auth.plan || auth.accountType) parts.push(auth.planType || auth.plan || auth.accountType);
+  const text = parts.join(" · ");
+  if (!text) return;
+  lastStatusChipText = text;
+  statusChip.textContent = text;
+  statusChip.classList.remove("hidden");
+  statusChip.dataset.active = activeBridge ? "true" : "false";
+}
+
+async function refreshStatusChip() {
+  if (!token) return;
+  try {
+    const result = await apiGet("/api/status");
+    updateStatusChip(result);
+  } catch {
+    if (lastStatusChipText) {
+      statusChip.textContent = "状態更新失敗";
+      statusChip.classList.remove("hidden");
+      statusChip.dataset.active = "false";
+    }
+  }
+}
+
 async function showStatus() {
   clearPanel("バックグラウンド");
   try {
     const result = await apiGet("/api/status");
+    updateStatusChip(result);
     const auth = result.auth || {};
-    const quota = auth.quota || auth.rateLimits || auth.limits || auth.usage || result.config?.quota || null;
+    const quota = quotaFromStatus(result);
     addPanelRow("認証", auth.authMethod || auth.status || "unknown");
     if (auth.planType || auth.plan || auth.accountType) addPanelRow("プラン", auth.planType || auth.plan || auth.accountType);
     if (quota) {
@@ -2089,8 +2395,13 @@ function connect({ automatic = false } = {}) {
       pendingApproval = msg.request;
       setRunState("approval");
       updateStopButton();
-      approvalText.textContent = JSON.stringify(msg.request.params, null, 2);
+      renderApprovalRequest(msg.request);
       approval.classList.remove("hidden");
+      return;
+    }
+    if (msg.type === "event") {
+      const structuredEvent = structuredEventFromBridgeEvent(msg.event);
+      if (structuredEvent) addWorkLogCard(structuredEvent);
       return;
     }
     if (msg.type === "turn" && msg.status === "started") {
@@ -2130,7 +2441,9 @@ function connect({ automatic = false } = {}) {
       if (/履歴同期を更新しました/.test(msg.text || "")) setRunState("done", "完了・履歴同期済み");
       else if (/履歴同期に失敗/.test(msg.text || "")) setRunState("error", "履歴同期に失敗");
       else if (/履歴同期/.test(msg.text || "")) setRunState("syncing", msg.text);
-      addEntry("status", msg.text);
+      const structuredEvent = normalizeWorkEvent(msg.event) || structuredEventFromHistoryEntry({ type: "status", text: msg.text });
+      if (structuredEvent) addWorkLogCard(structuredEvent);
+      else addEntry("status", msg.text);
     }
   });
 
@@ -2309,9 +2622,11 @@ if ("serviceWorker" in navigator) {
 }
 registerDevice()
   .then(restoreSessionState)
+  .then(refreshStatusChip)
   .then(loadArtifacts)
   .then(() => loadThreads({ background: true }))
   .catch(() => {})
   .finally(connect);
 setInterval(() => loadThreads({ background: true }), 10_000);
 setInterval(refreshSelectedThread, 3_000);
+setInterval(refreshStatusChip, 30_000);
