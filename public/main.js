@@ -566,6 +566,14 @@ function renderImageGallery(images = []) {
   return gallery;
 }
 
+function artifactImageForGallery(artifact) {
+  if (!artifact) return null;
+  return {
+    name: artifact.name || String(artifact.path || artifact.url || "image").split(/[\\/]/).pop(),
+    url: artifact.url,
+  };
+}
+
 function extractAssistantImageRefs(text = "") {
   const matches = new Set();
   const source = String(text || "");
@@ -674,12 +682,13 @@ function addEntry(kind, text, images = []) {
   const body = document.createElement("div");
   body.className = "entry-body";
   setEntryText(body, kind, text);
-  const gallery =
+  const galleryImages =
     kind === "user"
-      ? renderImageGallery(images)
+      ? images
       : kind === "assistant"
-        ? renderImageGallery(extractAssistantImageRefs(text))
-        : null;
+        ? [...(images || []), ...extractAssistantImageRefs(text)]
+        : [];
+  const gallery = renderImageGallery(galleryImages);
   if (gallery) body.appendChild(gallery);
 
   const tools = document.createElement("div");
@@ -1042,6 +1051,13 @@ function showRightPanel() {
   document.body.classList.remove("hide-artifacts");
   document.body.classList.add("show-panel");
   document.body.classList.remove("show-sidebar");
+}
+
+function isRightPanelOpen() {
+  if (window.matchMedia("(min-width: 1101px)").matches) {
+    return !document.body.classList.contains("hide-artifacts");
+  }
+  return document.body.classList.contains("show-panel");
 }
 
 function closeRightPanel() {
@@ -1983,14 +1999,17 @@ function connect({ automatic = false } = {}) {
       loadArtifacts();
       if (msg.artifact.type === "image" || msg.artifact.type === "screenshot") {
         if (rememberArtifactPreview(msg.artifact.path, "ws")) return;
-        artifactPreview.className = "artifact-preview";
-        artifactPreview.classList.remove("hidden");
-        showRightPanel();
-        setArtifactPreview({
-          path: msg.artifact.path,
-          kind: "image",
-          imageUrl: msg.artifact.url,
-        });
+        const label = msg.artifact.type === "screenshot" ? "スクショを受け取りました。" : "画像を受け取りました。";
+        addEntry("assistant", label, [artifactImageForGallery(msg.artifact)].filter(Boolean));
+        if (isRightPanelOpen()) {
+          artifactPreview.className = "artifact-preview";
+          artifactPreview.classList.remove("hidden");
+          setArtifactPreview({
+            path: msg.artifact.path,
+            kind: "image",
+            imageUrl: msg.artifact.url,
+          });
+        }
         addStatus(msg.artifact.type === "screenshot" ? "スクショを受け取りました。" : "画像を受け取りました。");
       }
       return;
