@@ -152,7 +152,10 @@ async function configureRuntimePorts() {
   }
 
   const uiHostForProbe = bindHost === "0.0.0.0" || bindHost === "::" ? "127.0.0.1" : bindHost;
-  const availableUiPort = await findAvailablePort(requestedUiPort, uiHostForProbe);
+  let availableUiPort = await findAvailablePort(requestedUiPort, uiHostForProbe);
+  if (shouldStartCodexServer && availableUiPort === codexPort) {
+    availableUiPort = await findAvailablePort(codexPort + 1, uiHostForProbe);
+  }
   if (availableUiPort !== requestedUiPort) {
     if (productMode || stablePublicUrl) {
       throw new Error(
@@ -1329,31 +1332,14 @@ class SharedBridge {
       const queuePreview = this.queuePreview();
       this.persistStatus("running", { queued: this.turnQueue.length, queuedPreview: queuePreview });
       this.emit("queued", { mode: "followup", text, queued: this.turnQueue.length, queuePreview });
-      this.emit("status", { text: `待機に入れました。待ち ${this.turnQueue.length} 件` });
+      this.emit("status", { text: `\u5f85\u6a5f\u306b\u5165\u308c\u307e\u3057\u305f\u3002\u5f85\u3061 ${this.turnQueue.length} \u4ef6` });
       return;
     }
     this.startPrompt(text, attachments, options);
   }
 
   interrupt(text, attachments = [], options = {}) {
-    if (!this.threadId) {
-      this.emit("error", { text: "Thread is not ready yet" });
-      return;
-    }
-    const droppedQueued = this.turnQueue.length;
-    if (!this.activeTurnId && !this.hasPendingTurnStart()) {
-      this.turnQueue = [];
-      this.emit("queued", { mode: "interrupt", text, queued: 0, replaced: droppedQueued, queuePreview: [] });
-      this.emit("status", droppedQueued ? { text: `前の待機 ${droppedQueued} 件を置き換えて、最優先で開始します。` } : { text: "最優先で開始します。" });
-      this.startPrompt(text, attachments, options);
-      return;
-    }
-    this.turnQueue = [{ text, attachments, options }];
-    const queuePreview = this.queuePreview();
-    this.persistStatus("running", { queued: this.turnQueue.length, queuedPreview: queuePreview });
-    this.emit("queued", { mode: "interrupt", text, queued: this.turnQueue.length, replaced: droppedQueued, queuePreview });
-    this.emit("status", droppedQueued ? { text: `停止して次の指示を送ります。前の待機 ${droppedQueued} 件は置き換えました。` } : { text: "停止して次の指示を送ります。" });
-    this.stop({ preserveQueue: true, reason: "interrupt" });
+    this.prompt(text, attachments, options);
   }
 
   startNextQueuedTurn() {
@@ -1362,7 +1348,7 @@ class SharedBridge {
     const queuePreview = this.queuePreview();
     this.persistStatus("running", { queued: this.turnQueue.length, queuedPreview: queuePreview });
     this.emit("queue", { queued: this.turnQueue.length, queuePreview });
-    this.emit("status", { text: `待機中の指示を開始します。残り ${this.turnQueue.length} 件` });
+    this.emit("status", { text: `\u5f85\u6a5f\u4e2d\u306e\u6307\u793a\u3092\u958b\u59cb\u3057\u307e\u3059\u3002\u6b8b\u308a ${this.turnQueue.length} \u4ef6` });
     this.startPrompt(next.text, next.attachments, next.options);
   }
   syncHistory(reason) {
@@ -1374,10 +1360,10 @@ class SharedBridge {
       enabled: historySyncEnabled,
     })
       .then((result) => {
-        if (!result.skipped) this.emit("status", { text: `履歴同期を更新しました (${reason})` });
+        if (!result.skipped) this.emit("status", { text: `\u5c65\u6b74\u540c\u671f\u3092\u66f4\u65b0\u3057\u307e\u3057\u305f (${reason})` });
       })
       .catch((error) => {
-        this.emit("status", { text: `履歴同期に失敗しました: ${error.message}` });
+        this.emit("status", { text: `\u5c65\u6b74\u540c\u671f\u306b\u5931\u6557\u3057\u307e\u3057\u305f: ${error.message}` });
       });
   }
 
@@ -1403,7 +1389,7 @@ class SharedBridge {
       ...params,
     });
     this.pending.set(id, "turn/start");
-    const displayText = savedImages.length ? `${text}\n\n添付: ${savedImages.map((image) => image.name).join(", ")}` : text;
+    const displayText = savedImages.length ? `${text}\n\n\u6dfb\u4ed8: ${savedImages.map((image) => image.name).join(", ")}` : text;
     this.appendHistory({ type: "user", text: displayText, attachments: savedImages });
     this.persistStatus("running", { queued: this.turnQueue.length, queuedPreview: this.queuePreview() });
     this.emit("user", { text: displayText, attachments: savedImages });
@@ -1428,7 +1414,7 @@ class SharedBridge {
       result = accept ? { decision: "accept" } : { decision: "decline" };
     }
     this.upstream.send(JSON.stringify({ id: requestMsg.id, result }));
-    this.emit("status", { text: accept ? "承認しました" : "拒否しました" });
+    this.emit("status", { text: accept ? "\u627f\u8a8d\u3057\u307e\u3057\u305f" : "\u62d2\u5426\u3057\u307e\u3057\u305f" });
   }
   stop({ preserveQueue = false, reason = "stop" } = {}) {
     const queuedCount = this.turnQueue.length;

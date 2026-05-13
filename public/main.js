@@ -88,9 +88,8 @@ let pendingFiles = [];
 let reconnectTimer = null;
 let reconnectAttempts = 0;
 let intentionalClose = false;
-let followUpButton = null;
-let interruptButton = null;
 let pendingFollowUpPreview = "";
+const recentArtifactPreviews = new Map();
 
 const runStateText = {
   connecting: "接続中",
@@ -570,6 +569,11 @@ function renderImageGallery(images = []) {
 function extractAssistantImageRefs(text = "") {
   const matches = new Set();
   const source = String(text || "");
+  const inlineImageUrls = new Set();
+  source.replace(/!\[[^\]]*\]\(([^)\s]+)\)/g, (_, href) => {
+    if (isImageHref(href)) inlineImageUrls.add(normalizeImageHref(href));
+    return "";
+  });
   const patterns = [
     /(?:docs\/assets|tmp\/generated-images|tmp\/workflow-screenshots|tmp\/screen-captures)\/[^\s"'`<>]+\.(?:png|jpe?g|gif|webp|svg)/gi,
     /[a-z]:(?:[\\/][^\s"'`<>]+)+\.(?:png|jpe?g|gif|webp|svg)/gi,
@@ -580,10 +584,17 @@ function extractAssistantImageRefs(text = "") {
       matches.add(match[0]);
     }
   }
-  return [...matches].map((value) => ({
-    name: value.split(/[\\/]/).pop(),
-    url: normalizeImageHref(value),
-  }));
+  const seenUrls = new Set();
+  return [...matches]
+    .map((value) => ({
+      name: value.split(/[\\/]/).pop(),
+      url: normalizeImageHref(value),
+    }))
+    .filter((image) => {
+      if (inlineImageUrls.has(image.url) || seenUrls.has(image.url)) return false;
+      seenUrls.add(image.url);
+      return true;
+    });
 }
 
 function summarizeStatus(items) {
@@ -699,35 +710,7 @@ function updateStopButton() {
 }
 
 function ensureComposerActionButtons() {
-  if (followUpButton && interruptButton) return;
-  const right = document.querySelector(".composer-right");
-  if (!right || !sendButton) return;
-  if (!followUpButton) {
-    followUpButton = document.createElement("button");
-    followUpButton.type = "button";
-    followUpButton.className = "secondary-action-button tool-button";
-    followUpButton.id = "followUpButton";
-    followUpButton.textContent = "追加";
-    followUpButton.title = "続けて送る";
-    right.insertBefore(followUpButton, stopButton || modelButton || sendButton);
-  }
-  if (!interruptButton) {
-    interruptButton = document.createElement("button");
-    interruptButton.type = "button";
-    interruptButton.className = "secondary-action-button interrupt tool-button";
-    interruptButton.id = "interruptButton";
-    interruptButton.textContent = "停止して送る";
-    interruptButton.title = "いまの処理を止めて送る";
-    right.insertBefore(interruptButton, stopButton || modelButton || sendButton);
-  }
-  if (followUpButton && !followUpButton.dataset.bound) {
-    followUpButton.addEventListener("click", () => sendComposerMessage("followup"));
-    followUpButton.dataset.bound = "1";
-  }
-  if (interruptButton && !interruptButton.dataset.bound) {
-    interruptButton.addEventListener("click", () => sendComposerMessage("interrupt"));
-    interruptButton.dataset.bound = "1";
-  }
+  // The black send button handles normal follow-up guidance while Codex is running.
 }
 
 function previewText(value, limit = 72) {
@@ -757,12 +740,9 @@ function sendComposerMessage(type = "prompt") {
   promptInput.value = "";
   pendingFiles = [];
   renderAttachments();
-  if (type === "interrupt") {
+  if (type === "followup") {
     pendingFollowUpPreview = previewText(displayText);
-    addStatus(`停止して送信: ${pendingFollowUpPreview}`);
-  } else if (type === "followup") {
-    pendingFollowUpPreview = previewText(displayText);
-    addStatus(`追加を送信: ${pendingFollowUpPreview}`);
+    addStatus(`待機に入れました: ${pendingFollowUpPreview}`);
   }
   liveTurnActive = true;
   updateStopButton();
@@ -775,17 +755,22 @@ function updateComposerActions() {
   const hasDraft = Boolean(promptInput?.value.trim() || pendingFiles.length);
   if (sendButton) {
     sendButton.disabled = !connected;
-    sendButton.title = liveTurnActive ? "追加で送る" : "送信";
+    sendButton.title = liveTurnActive ? "待機に入れる" : "送信";
     if (sendButton.innerHTML !== defaultSendButtonLabel) sendButton.innerHTML = defaultSendButtonLabel;
   }
-  if (followUpButton) {
-    followUpButton.hidden = !liveTurnActive;
-    followUpButton.disabled = !connected || !hasDraft;
+}
+
+function rememberArtifactPreview(path, source = "") {
+  const key = String(path || "");
+  if (!key) return false;
+  const now = Date.now();
+  for (const [candidate, seenAt] of recentArtifactPreviews) {
+    if (now - seenAt > 5000) recentArtifactPreviews.delete(candidate);
   }
-  if (interruptButton) {
-    interruptButton.hidden = !liveTurnActive;
-    interruptButton.disabled = !connected || !hasDraft;
-  }
+  const duplicate = recentArtifactPreviews.has(key);
+  recentArtifactPreviews.set(key, now);
+  if (source) recentArtifactPreviews.set(`${source}:${key}`, now);
+  return duplicate;
 }
 
 function renderHistory(history) {
@@ -1152,6 +1137,7 @@ async function capturePcScreen() {
     renderArtifactRows();
     artifactPreview.className = "artifact-preview";
     artifactPreview.classList.remove("hidden");
+    rememberArtifactPreview(result.path, "api");
     setArtifactPreview(result);
     addStatus("PC画面のスクショをスマホへ送りました。");
   } catch (error) {
@@ -1996,6 +1982,7 @@ function connect({ automatic = false } = {}) {
     if (msg.type === "artifact" && msg.artifact) {
       loadArtifacts();
       if (msg.artifact.type === "image" || msg.artifact.type === "screenshot") {
+        if (rememberArtifactPreview(msg.artifact.path, "ws")) return;
         artifactPreview.className = "artifact-preview";
         artifactPreview.classList.remove("hidden");
         showRightPanel();
@@ -2009,12 +1996,8 @@ function connect({ automatic = false } = {}) {
       return;
     }
     if (msg.type === "queued") {
-      setRunState("running", msg.mode === "interrupt" ? "停止して次を準備中" : "追加指示を受付中");
-      addStatus(
-        msg.mode === "interrupt"
-          ? `割り込みを最優先で準備しました${msg.replaced ? `。前の追加 ${msg.replaced} 件は置き換えています` : ""}: ${previewText(msg.text)}`
-          : `追加を受け付けました: ${previewText(msg.text)}`,
-      );
+      setRunState("running", "待機中");
+      addStatus(`待機に入りました: ${previewText(msg.text)}`);
       return;
     }
     if (msg.type === "user") {
@@ -2172,8 +2155,6 @@ fileInput.addEventListener("change", async () => {
   }
 });
 promptInput.addEventListener("input", updateComposerActions);
-followUpButton?.addEventListener("click", () => sendComposerMessage("followup"));
-interruptButton?.addEventListener("click", () => sendComposerMessage("interrupt"));
 stopButton?.addEventListener("click", () => {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   ws.send(JSON.stringify({ type: "stop", token }));
