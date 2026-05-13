@@ -1,13 +1,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
   <title id="title">Codex Remote</title>
   <desc id="desc">Control your own PC Codex from your phone.</desc>
-  <rect width="1200" height="630" fill="#f6f3ea"/>
-  <rect x="78" y="78" width="1044" height="474" rx="34" fill="#15151a"/>
-  <rect x="138" y="140" width="250" height="350" rx="28" fill="#f6f3ea"/>
-  <path d="M178 205h168v18H178zm0 52h126v18H178zm0 52h150v18H178z" fill="#15151a"/>
-  <path d="M445 268h150a70 70 0 0 1 0 140H472" fill="none" stroke="#41d6a4" stroke-width="34" stroke-linecap="round"/>
-  <circle cx="624" cy="268" r="31" fill="#ffb347"/>
-  <text x="700" y="270" fill="#f6f3ea" font-family="Arial, Helvetica, sans-serif" font-size="58" font-weight="700">Codex Remote</text>
-  <text x="700" y="348" fill="#d7d2c3" font-family="Arial, Helvetica, sans-serif" font-size="34">localhost PC bridge</text>
-  <text x="700" y="398" fill="#d7d2c3" font-family="Arial, Helvetica, sans-serif" font-size="34">token-protected public URL</text>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#10211d"/>
+      <stop offset="100%" stop-color="#18342d"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="#f4efe1"/>
+  <rect x="54" y="54" width="1092" height="522" rx="44" fill="url(#bg)"/>
+  <circle cx="240" cy="214" r="86" fill="#f4efe1"/>
+  <path d="M156 402c24-83 94-136 184-136 37 0 72 8 103 25" fill="none" stroke="#ffd166" stroke-width="26" stroke-linecap="round"/>
+  <path d="M178 430 414 194" fill="none" stroke="#ff6b57" stroke-width="52" stroke-linecap="round"/>
+  <circle cx="414" cy="418" r="54" fill="#56e3c6"/>
+  <circle cx="414" cy="418" r="18" fill="#10211d"/>
+  <text x="566" y="238" fill="#f4efe1" font-family="Trebuchet MS, Segoe UI, sans-serif" font-size="68" font-weight="700">Codex Remote</text>
+  <text x="566" y="316" fill="#d9dbc8" font-family="Trebuchet MS, Segoe UI, sans-serif" font-size="34">Phone-first control for your own PC session</text>
+  <text x="566" y="370" fill="#d9dbc8" font-family="Trebuchet MS, Segoe UI, sans-serif" font-size="34">Local execution, token-protected access, resumable work</text>
 </svg>
