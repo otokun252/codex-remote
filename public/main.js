@@ -737,6 +737,11 @@ function previewText(value, limit = 72) {
   return compact.length > limit ? `${compact.slice(0, limit)}...` : compact;
 }
 
+function shouldShowQueuedStatus(text, pendingPreview) {
+  const queuedPreview = previewText(text);
+  return !pendingPreview || queuedPreview !== pendingPreview;
+}
+
 function labelForEventType(type) {
   if (type === "commandExecution") return "コマンド";
   if (type === "fileChange") return "ファイル変更";
@@ -929,15 +934,18 @@ function updateComposerActions() {
 }
 
 function rememberArtifactPreview(path, source = "") {
+  return rememberRecentArtifactPreview(recentArtifactPreviews, path, { source });
+}
+
+function rememberRecentArtifactPreview(recentPreviews, path, { source = "", now = Date.now(), ttlMs = 5000 } = {}) {
   const key = String(path || "");
   if (!key) return false;
-  const now = Date.now();
-  for (const [candidate, seenAt] of recentArtifactPreviews) {
-    if (now - seenAt > 5000) recentArtifactPreviews.delete(candidate);
+  for (const [candidate, seenAt] of recentPreviews) {
+    if (now - seenAt > ttlMs) recentPreviews.delete(candidate);
   }
-  const duplicate = recentArtifactPreviews.has(key);
-  recentArtifactPreviews.set(key, now);
-  if (source) recentArtifactPreviews.set(`${source}:${key}`, now);
+  const duplicate = recentPreviews.has(key);
+  recentPreviews.set(key, now);
+  if (source) recentPreviews.set(`${source}:${key}`, now);
   return duplicate;
 }
 
@@ -2373,7 +2381,10 @@ function connect({ automatic = false } = {}) {
     }
     if (msg.type === "queued") {
       setRunState("running", "待機中");
-      addStatus(`待機に入りました: ${previewText(msg.text)}`);
+      if (shouldShowQueuedStatus(msg.text, pendingFollowUpPreview)) {
+        addStatus(`待機に入りました: ${previewText(msg.text)}`);
+      }
+      pendingFollowUpPreview = "";
       return;
     }
     if (msg.type === "user") {
@@ -2630,3 +2641,11 @@ registerDevice()
 setInterval(() => loadThreads({ background: true }), 10_000);
 setInterval(refreshSelectedThread, 3_000);
 setInterval(refreshStatusChip, 30_000);
+
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    previewText,
+    rememberRecentArtifactPreview,
+    shouldShowQueuedStatus,
+  };
+}

@@ -954,7 +954,7 @@ function artifactUrlForPath(relativePath) {
   return `/api/file/raw?path=${encodeURIComponent(relativePath)}&v=${encodeURIComponent(artifactVersionForPath(relativePath))}`;
 }
 
-function registerArtifact({ sessionId = "", type = "file", relativePath }) {
+function registerArtifact({ sessionId = "", type = "file", relativePath, emit = true }) {
   if (!relativePath) return null;
   const artifact = store.addArtifact(sessionId, {
     type,
@@ -962,7 +962,7 @@ function registerArtifact({ sessionId = "", type = "file", relativePath }) {
     url: artifactUrlForPath(relativePath),
   });
   if (!artifact) return null;
-  if (!artifact.unchanged) {
+  if (emit && !artifact.unchanged) {
     for (const bridge of bridges.values()) {
       if (!sessionId || bridge.threadId === sessionId) bridge.emit("artifact", { artifact });
     }
@@ -1138,6 +1138,10 @@ function previewText(value, limit = 72) {
   const compact = String(value || "").replace(/\s+/g, " ").trim();
   if (!compact) return "";
   return compact.length > limit ? `${compact.slice(0, limit)}...` : compact;
+}
+
+function shouldRestartForInterrupt({ activeTurnId = "", pendingTurnStart = false } = {}) {
+  return Boolean(activeTurnId || pendingTurnStart);
 }
 
 function pickFirstString(...values) {
@@ -1507,14 +1511,18 @@ class SharedBridge {
       const queuePreview = this.queuePreview();
       this.persistStatus("running", { queued: this.turnQueue.length, queuedPreview: queuePreview });
       this.emit("queued", { mode: "followup", text, queued: this.turnQueue.length, queuePreview });
-      this.emit("status", { text: `\u5f85\u6a5f\u306b\u5165\u308c\u307e\u3057\u305f\u3002\u5f85\u3061 ${this.turnQueue.length} \u4ef6` });
       return;
     }
     this.startPrompt(text, attachments, options);
   }
 
   interrupt(text, attachments = [], options = {}) {
+    const shouldRestart = shouldRestartForInterrupt({
+      activeTurnId: this.activeTurnId,
+      pendingTurnStart: this.hasPendingTurnStart(),
+    });
     this.prompt(text, attachments, options);
+    if (shouldRestart) this.stop({ preserveQueue: true, reason: "interrupt" });
   }
 
   startNextQueuedTurn() {
@@ -2098,7 +2106,7 @@ async function main() {
       try {
         const result = await captureDesktopScreenshot();
         const sessionId = url.searchParams.get("thread") || "";
-        const artifact = registerArtifact({ sessionId, type: "screenshot", relativePath: result.path });
+        const artifact = registerArtifact({ sessionId, type: "screenshot", relativePath: result.path, emit: false });
         sendJson(res, 200, {
           ok: true,
           path: result.path,
@@ -2309,7 +2317,14 @@ async function main() {
   });
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  previewText,
+  shouldRestartForInterrupt,
+};
