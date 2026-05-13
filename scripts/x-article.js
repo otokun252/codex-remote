@@ -5,6 +5,7 @@ const net = require("net");
 const http = require("http");
 const { spawn } = require("child_process");
 const { chromium } = require("playwright");
+const { openUrlInReusableTab } = require("./chrome-tab-reuse");
 
 const root = path.resolve(__dirname, "..");
 const localAppData =
@@ -211,9 +212,12 @@ function startChromeForCdp(args) {
   return { port, profile, exe };
 }
 
-function openChromeTarget(url, args = {}) {
+async function openChromeTarget(url, args = {}) {
   const exe = detectChromeExe();
   const profile = resolveChromeProfile(args.account, args.profile);
+  const port = Number(args.port || 9222);
+  const reusable = await openUrlInReusableTab(withXLang(url), { port, matchHosts: ["x.com"] }).catch(() => null);
+  if (reusable?.ok) return { exe, profile, reused: reusable.reused };
   const commandArgs = [`--profile-directory=${profile}`, "--lang=en-US"];
   commandArgs.push(withXLang(url));
   const child = spawn(exe, commandArgs, {
@@ -472,7 +476,7 @@ async function articleFlow(args) {
     if (screenshotPath) console.log(`SCREENSHOT:${relativeToRoot(screenshotPath)}`);
   } catch (error) {
     if (args["dry-run"]) {
-      const { profile } = openChromeTarget("https://x.com/compose/articles", args);
+      const { profile } = await openChromeTarget("https://x.com/compose/articles", args);
       console.log(`CDP path failed: ${error.message}`);
       console.log(`Opened X Articles in Chrome profile "${profile}" for manual drafting.`);
       console.log(`Draft copy: ${draftCopy}`);

@@ -168,3 +168,12 @@ test("interrupt follow-up only restarts the bridge while a turn is active or sta
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("chrome tab reuse matches an existing product tab by host", () => {
+  const { hostForUrl, tabMatchesHosts } = require("./chrome-tab-reuse");
+
+  assert.equal(hostForUrl("https://x.com/compose/post?lang=en"), "x.com");
+  assert.equal(tabMatchesHosts({ url: "https://x.com/home" }, ["x.com"]), true);
+  assert.equal(tabMatchesHosts({ url: "https://editor.note.com/notes/1" }, ["note.com"]), true);
+  assert.equal(tabMatchesHosts({ url: "https://example.com/" }, ["x.com", "note.com"]), false);
+});

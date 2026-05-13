@@ -5,6 +5,7 @@ const net = require("net");
 const http = require("http");
 const { spawn } = require("child_process");
 const { chromium } = require("playwright");
+const { openUrlInReusableTab } = require("./chrome-tab-reuse");
 
 const root = path.resolve(__dirname, "..");
 const localAppData =
@@ -286,9 +287,12 @@ function startChromeForCdp(args) {
   return { port, profile, exe };
 }
 
-function openChromeTarget(url, args = {}) {
+async function openChromeTarget(url, args = {}) {
   const exe = detectChromeExe();
   const profile = resolveChromeProfile(args.account, args.profile);
+  const port = Number(args.port || 9222);
+  const reusable = await openUrlInReusableTab(withXLang(url), { port, matchHosts: ["x.com"] }).catch(() => null);
+  if (reusable?.ok) return { exe, profile, reused: reusable.reused };
   const commandArgs = [
     `--profile-directory=${profile}`,
     "--lang=en-US",
@@ -518,7 +522,7 @@ async function publishWithHotkeyFallback(args, text) {
   }
   const delayMs = Number(args["send-delay-ms"] || 7000);
   const compose = composeUrl(text);
-  const { profile } = openChromeTarget(compose, args);
+  const { profile } = await openChromeTarget(compose, args);
   if (args["dry-run"]) {
     console.log(
       `Opened compose window in Chrome profile "${profile}" without publishing.`,
@@ -549,7 +553,7 @@ async function publishWithUiaFallback(args, text) {
   }
   const delayMs = Number(args["send-delay-ms"] || 7000);
   const compose = composeUrl(text);
-  const { profile } = openChromeTarget(compose, args);
+  const { profile } = await openChromeTarget(compose, args);
   const scriptPath = path.join(__dirname, "x-post-uia.py");
   const helperArgs = [
     scriptPath,

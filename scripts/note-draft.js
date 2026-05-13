@@ -2,6 +2,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { spawn } = require("child_process");
+const { openUrlInReusableTab } = require("./chrome-tab-reuse");
 
 const root = path.resolve(__dirname, "..");
 const localAppData =
@@ -92,9 +93,12 @@ function relativeToRoot(target) {
   return path.relative(root, target).replace(/\\/g, "/");
 }
 
-function openChromeTarget(url, args = {}) {
+async function openChromeTarget(url, args = {}) {
   const exe = detectChromeExe();
   const profile = resolveChromeProfile(args.account, args.profile);
+  const port = Number(args.port || 9222);
+  const reusable = await openUrlInReusableTab(url, { port, matchHosts: ["note.com"] }).catch(() => null);
+  if (reusable?.ok) return { exe, profile, reused: reusable.reused };
   const commandArgs = [`--profile-directory=${profile}`];
   if (args["new-window"]) {
     commandArgs.push("--new-window");
@@ -172,7 +176,7 @@ async function saveFlow(args) {
   }
   const draftCopy = saveDraftCopy(title, body);
   const delayMs = Number(args["send-delay-ms"] || 7000);
-  const { profile } = openChromeTarget("https://note.com/new", args);
+  const { profile } = await openChromeTarget("https://note.com/new", args);
   const scriptPath = path.join(__dirname, "note-draft-uia.py");
   const helperArgs = [
     scriptPath,
