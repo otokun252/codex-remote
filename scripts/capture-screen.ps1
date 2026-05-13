@@ -12,12 +12,13 @@ if (-not [string]::IsNullOrWhiteSpace($dir)) {
   New-Item -ItemType Directory -Force -Path $dir | Out-Null
 }
 
-$bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+$bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
 $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
 $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
 
 try {
-  $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+  $sourcePoint = New-Object System.Drawing.Point($bounds.Left, $bounds.Top)
+  $graphics.CopyFromScreen($sourcePoint, [System.Drawing.Point]::Empty, $bounds.Size)
   $bitmap.Save($target, [System.Drawing.Imaging.ImageFormat]::Png)
   Write-Output $target
 }

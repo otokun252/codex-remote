@@ -58,6 +58,7 @@ const bindHost = process.env.PHONE_BIND_HOST || "127.0.0.1";
 const tokenPath = path.join(root, ".phone-token");
 const uploadDir = path.join(root, ".uploads");
 const screenCaptureDir = path.join(root, "tmp", "screen-captures");
+const codexGeneratedImageDir = path.join(os.homedir(), ".codex", "generated_images");
 const stateRoot =
   process.env.PHONE_STATE_DIR ||
   (process.platform === "win32" && process.env.LOCALAPPDATA
@@ -577,6 +578,34 @@ function resolveArtifactBaseFromUrl(url) {
   return null;
 }
 
+function runtimeStateForThread(threadId) {
+  const clean = String(threadId || "").trim();
+  if (!clean) return { active: false, queued: 0, queuePreview: [], clients: 0, ready: false, status: "" };
+  const liveBridge = Array.from(bridges.values()).find((bridge) => bridge.threadId === clean) || null;
+  if (liveBridge) {
+    return {
+      active: Boolean(liveBridge.activeTurnId || liveBridge.hasPendingTurnStart()),
+      queued: liveBridge.turnQueue.length,
+      queuePreview: liveBridge.queuePreview(),
+      clients: liveBridge.clients.size,
+      ready: liveBridge.ready,
+      status: liveBridge.activeTurnId || liveBridge.hasPendingTurnStart() ? "running" : liveBridge.ready ? "ready" : "starting",
+    };
+  }
+  const session = store.getSession(clean);
+  if (!session) return { active: false, queued: 0, queuePreview: [], clients: 0, ready: false, status: "" };
+  const queued = Number(session.queued || 0);
+  const active = session.status === "running" || queued > 0 || Boolean(session.activeTurnId);
+  return {
+    active,
+    queued,
+    queuePreview: Array.isArray(session.queuedPreview) ? session.queuedPreview : [],
+    clients: 0,
+    ready: session.status === "ready" || session.status === "completed",
+    status: String(session.status || ""),
+  };
+}
+
 function discoverArtifacts(baseDir = root) {
   const files = [];
   const addArtifact = (relative) => {
@@ -851,20 +880,48 @@ async function captureDesktopScreenshot() {
   };
 }
 
+function artifactVersionForPath(relativePath) {
+  const absolutePath = path.join(root, relativePath);
+  try {
+    return String(fs.statSync(absolutePath).mtimeMs);
+  } catch {
+    return String(Date.now());
+  }
+}
+
+function isWithinDir(target, baseDir) {
+  const resolvedTarget = path.resolve(target);
+  const resolvedBase = path.resolve(baseDir);
+  if (process.platform === "win32") {
+    const lowerTarget = resolvedTarget.toLowerCase();
+    const lowerBase = resolvedBase.toLowerCase();
+    return lowerTarget === lowerBase || lowerTarget.startsWith(`${lowerBase}${path.sep}`);
+  }
+  return resolvedTarget === resolvedBase || resolvedTarget.startsWith(`${resolvedBase}${path.sep}`);
+}
+
+function safeCodexGeneratedImagePath(input) {
+  const raw = String(input || "").trim();
+  if (!raw) return null;
+  const target = path.isAbsolute(raw) ? path.resolve(raw) : path.resolve(codexGeneratedImageDir, raw);
+  if (!isWithinDir(target, codexGeneratedImageDir)) return null;
+  if (!fs.existsSync(target) || !fs.statSync(target).isFile() || !isImagePath(target)) return null;
+  return target;
+}
+
 function artifactUrlForPath(relativePath) {
-  return `/api/file/raw?path=${encodeURIComponent(relativePath)}`;
+  return `/api/file/raw?path=${encodeURIComponent(relativePath)}&v=${encodeURIComponent(artifactVersionForPath(relativePath))}`;
 }
 
 function registerArtifact({ sessionId = "", type = "file", relativePath }) {
   if (!relativePath) return null;
-  const existed = store.state.artifacts.some((item) => item.path === relativePath);
   const artifact = store.addArtifact(sessionId, {
     type,
     path: relativePath,
     url: artifactUrlForPath(relativePath),
   });
   if (!artifact) return null;
-  if (!existed) {
+  if (!artifact.unchanged) {
     for (const bridge of bridges.values()) {
       if (!sessionId || bridge.threadId === sessionId) bridge.emit("artifact", { artifact });
     }
@@ -1028,6 +1085,12 @@ function capHistory(history) {
   return history.slice(-historyLimit);
 }
 
+function previewText(value, limit = 72) {
+  const compact = String(value || "").replace(/\s+/g, " ").trim();
+  if (!compact) return "";
+  return compact.length > limit ? `${compact.slice(0, limit)}...` : compact;
+}
+
 class SharedBridge {
   constructor(requestedThreadId, bridgeKey, deviceId = "") {
     this.requestedThreadId = requestedThreadId;
@@ -1083,6 +1146,13 @@ class SharedBridge {
     };
   }
 
+  queuePreview(limit = 3) {
+    return this.turnQueue.slice(0, limit).map((item) => ({
+      text: previewText(item.text || ""),
+      attachments: Array.isArray(item.attachments) ? item.attachments.length : 0,
+    }));
+  }
+
   emit(type, payload = {}) {
     const body = JSON.stringify({ type, ...payload });
     for (const client of this.clients) {
@@ -1100,6 +1170,7 @@ class SharedBridge {
       status,
       activeTurnId: this.activeTurnId || "",
       queued: this.turnQueue.length,
+      queuedPreview: this.queuePreview(),
       ...extra,
     });
   }
@@ -1255,8 +1326,10 @@ class SharedBridge {
     }
     if (this.activeTurnId || this.hasPendingTurnStart()) {
       this.turnQueue.push({ text, attachments, options });
-      this.persistStatus("running", { queued: this.turnQueue.length });
-      this.emit("status", { text: `Follow-up queued (${this.turnQueue.length} waiting)` });
+      const queuePreview = this.queuePreview();
+      this.persistStatus("running", { queued: this.turnQueue.length, queuedPreview: queuePreview });
+      this.emit("queued", { mode: "followup", text, queued: this.turnQueue.length, queuePreview });
+      this.emit("status", { text: `待機に入れました。待ち ${this.turnQueue.length} 件` });
       return;
     }
     this.startPrompt(text, attachments, options);
@@ -1267,23 +1340,31 @@ class SharedBridge {
       this.emit("error", { text: "Thread is not ready yet" });
       return;
     }
+    const droppedQueued = this.turnQueue.length;
     if (!this.activeTurnId && !this.hasPendingTurnStart()) {
+      this.turnQueue = [];
+      this.emit("queued", { mode: "interrupt", text, queued: 0, replaced: droppedQueued, queuePreview: [] });
+      this.emit("status", droppedQueued ? { text: `前の待機 ${droppedQueued} 件を置き換えて、最優先で開始します。` } : { text: "最優先で開始します。" });
       this.startPrompt(text, attachments, options);
       return;
     }
-    this.turnQueue.unshift({ text, attachments, options });
-    this.persistStatus("running", { queued: this.turnQueue.length });
-    this.emit("status", { text: "Interrupt requested. Stopping current run..." });
+    this.turnQueue = [{ text, attachments, options }];
+    const queuePreview = this.queuePreview();
+    this.persistStatus("running", { queued: this.turnQueue.length, queuedPreview: queuePreview });
+    this.emit("queued", { mode: "interrupt", text, queued: this.turnQueue.length, replaced: droppedQueued, queuePreview });
+    this.emit("status", droppedQueued ? { text: `停止して次の指示を送ります。前の待機 ${droppedQueued} 件は置き換えました。` } : { text: "停止して次の指示を送ります。" });
     this.stop({ preserveQueue: true, reason: "interrupt" });
   }
 
   startNextQueuedTurn() {
     if (!this.ready || this.activeTurnId || this.hasPendingTurnStart() || !this.turnQueue.length) return;
     const next = this.turnQueue.shift();
-    this.emit("status", { text: `Starting queued follow-up (${this.turnQueue.length} remaining)` });
+    const queuePreview = this.queuePreview();
+    this.persistStatus("running", { queued: this.turnQueue.length, queuedPreview: queuePreview });
+    this.emit("queue", { queued: this.turnQueue.length, queuePreview });
+    this.emit("status", { text: `待機中の指示を開始します。残り ${this.turnQueue.length} 件` });
     this.startPrompt(next.text, next.attachments, next.options);
   }
-
   syncHistory(reason) {
     if (!this.threadId || !historySyncEnabled) return;
     runHistorySync({
@@ -1315,6 +1396,7 @@ class SharedBridge {
       input,
     };
     if (options.model) params.model = options.model;
+    if (options.reasoningEffort) params.reasoningEffort = options.reasoningEffort;
     if (options.approvalPolicy) params.approvalPolicy = options.approvalPolicy;
     if (options.sandboxMode) params.sandboxPolicy = sandboxPolicyForMode(options.sandboxMode);
     const id = this.request("turn/start", {
@@ -1323,7 +1405,7 @@ class SharedBridge {
     this.pending.set(id, "turn/start");
     const displayText = savedImages.length ? `${text}\n\n添付: ${savedImages.map((image) => image.name).join(", ")}` : text;
     this.appendHistory({ type: "user", text: displayText, attachments: savedImages });
-    this.persistStatus("running", { queued: this.turnQueue.length });
+    this.persistStatus("running", { queued: this.turnQueue.length, queuedPreview: this.queuePreview() });
     this.emit("user", { text: displayText, attachments: savedImages });
   }
 
@@ -1366,7 +1448,7 @@ class SharedBridge {
             : "Nothing was running",
       });
       this.emit("turn", { status: "stopped" });
-      this.persistStatus("stopped", { activeTurnId: "", queued: this.turnQueue.length });
+      this.persistStatus("stopped", { activeTurnId: "", queued: this.turnQueue.length, queuedPreview: this.queuePreview() });
       return;
     }
     this.emit("status", {
@@ -1378,7 +1460,7 @@ class SharedBridge {
             : "Stopping current run",
     });
     this.emit("turn", { status: "stopped" });
-    this.persistStatus("stopped", { activeTurnId: "", queued: this.turnQueue.length });
+    this.persistStatus("stopped", { activeTurnId: "", queued: this.turnQueue.length, queuedPreview: this.queuePreview() });
     this.pending.clear();
     this.activeTurnId = null;
     this.ready = false;
@@ -1398,6 +1480,12 @@ class SharedBridge {
 }
 
 function getBridge(threadId, connectionId = crypto.randomUUID(), deviceId = "") {
+  if (deviceId) {
+    const deviceBridge = Array.from(bridges.values()).find((bridge) => bridge.deviceId === deviceId);
+    if (deviceBridge && (!threadId || deviceBridge.threadId === threadId || deviceBridge.requestedThreadId === threadId)) {
+      return deviceBridge;
+    }
+  }
   if (!threadId) {
     for (const bridge of bridges.values()) {
       if (!bridge.requestedThreadId) return bridge;
@@ -1518,6 +1606,7 @@ async function main() {
               ready: liveBridge.ready,
               active: Boolean(liveBridge.activeTurnId || liveBridge.hasPendingTurnStart()),
               queued: liveBridge.turnQueue.length,
+              queuePreview: liveBridge.queuePreview(),
               clients: liveBridge.clients.size,
             }
           : null,
@@ -1534,7 +1623,11 @@ async function main() {
           archived: false,
           useStateDbOnly: false,
         });
-        sendJson(res, 200, result);
+        const data = (result.data || []).map((thread) => ({
+          ...thread,
+          runtime: runtimeStateForThread(thread.id),
+        }));
+        sendJson(res, 200, { ...result, data });
       } catch (error) {
         sendJson(res, 500, { error: error.message });
       }
@@ -1891,6 +1984,17 @@ async function main() {
       fs.createReadStream(target).pipe(res);
       return;
     }
+    if (url.pathname === "/api/codex-generated-image") {
+      if (!requireToken(url, phoneToken, res)) return;
+      const target = safeCodexGeneratedImagePath(url.searchParams.get("path"));
+      if (!target) {
+        sendJson(res, 404, { error: "generated image not found" });
+        return;
+      }
+      res.writeHead(200, { "content-type": mimeForPath(target), "cache-control": "no-store" });
+      fs.createReadStream(target).pipe(res);
+      return;
+    }
     if (url.pathname === "/api/file") {
       if (!requireToken(url, phoneToken, res)) return;
       const baseDir = resolveArtifactBaseFromUrl(url) || artifactBaseDir(await resolveThreadCwd(url.searchParams.get("thread")));
@@ -1900,11 +2004,12 @@ async function main() {
         return;
       }
       if (isImagePath(target)) {
+        const relativePath = path.relative(baseDir, target).replace(/\\/g, "/");
         sendJson(res, 200, {
-          path: path.relative(baseDir, target).replace(/\\/g, "/"),
+          path: relativePath,
           kind: "image",
           mimeType: mimeForPath(target),
-          imageUrl: `/api/file/raw?path=${encodeURIComponent(path.relative(baseDir, target).replace(/\\/g, "/"))}&thread=${encodeURIComponent(url.searchParams.get("thread") || "")}&cwd=${encodeURIComponent(baseDir)}`,
+          imageUrl: `/api/file/raw?path=${encodeURIComponent(relativePath)}&thread=${encodeURIComponent(url.searchParams.get("thread") || "")}&cwd=${encodeURIComponent(baseDir)}&v=${encodeURIComponent(String(fs.statSync(target).mtimeMs))}`,
         });
         return;
       }

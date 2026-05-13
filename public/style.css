@@ -6,20 +6,20 @@
   color: var(--text);
   --bg: #ffffff;
   --text: #181818;
-  --sidebar: #f4f4f3;
-  --sidebar-start: #f2f3f2;
-  --sidebar-end: #f7f4f0;
-  --line: #e7e7e4;
-  --muted: #777772;
-  --soft: #f7f7f5;
+  --sidebar: #f7f7f6;
+  --sidebar-start: #f7f7f6;
+  --sidebar-end: #f7f7f6;
+  --line: #e3e3e0;
+  --muted: #6d6d69;
+  --soft: #f3f3f1;
   --card: #ffffff;
-  --panel: #fbfbfa;
-  --accent: #ff5d22;
-  --button: #202020;
+  --panel: #fafaf8;
+  --accent: #181818;
+  --button: #181818;
   --button-text: #ffffff;
-  --nav-text: #343433;
-  --nav-muted: #464641;
-  --hover: rgba(0, 0, 0, 0.055);
+  --nav-text: #2b2b29;
+  --nav-muted: #50504d;
+  --hover: rgba(0, 0, 0, 0.04);
   --field: rgba(255, 255, 255, 0.84);
   --entry: #22221f;
   --avatar: #f0f0ed;
@@ -30,7 +30,7 @@
   --link: #0b65c2;
   --composer-bg: rgba(255, 255, 255, 0.96);
   --composer-border: #dadad6;
-  --composer-shadow: 0 16px 38px rgba(0, 0, 0, 0.08);
+  --composer-shadow: 0 10px 24px rgba(0, 0, 0, 0.05);
   --scrim: rgba(0, 0, 0, 0.12);
   --warning-line: #f0b36b;
   --warning-bg: #fff8ed;
@@ -177,7 +177,7 @@ button {
   min-width: 0;
   min-height: 0;
   padding: 12px 12px 16px;
-  background: linear-gradient(180deg, var(--sidebar-start) 0%, var(--sidebar-end) 100%);
+  background: var(--sidebar);
   border-right: 1px solid var(--line);
 }
 
@@ -189,13 +189,14 @@ button {
 .nav-command,
 .settings {
   width: 100%;
-  min-height: 36px;
+  min-height: 34px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 0 10px;
   background: transparent;
   color: var(--nav-text);
   text-align: left;
+  font-size: 14px;
 }
 
 .nav-command:hover,
@@ -253,18 +254,29 @@ button {
   width: 100%;
   min-height: 34px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 0 10px;
   background: transparent;
   color: var(--muted);
   text-align: left;
-  font-size: 15px;
+  font-size: 14px;
 }
 
 button.project-heading:hover,
 button.project-heading.active {
   background: var(--hover);
   color: var(--text);
+}
+
+.project-heading.running {
+  border: 1px solid color-mix(in srgb, #2f9b57 48%, var(--line));
+  background: color-mix(in srgb, #2f9b57 8%, transparent);
+  color: #236f3f;
+}
+
+.project-heading.running .project-folder,
+.project-heading.running .project-folder::before {
+  border-color: #2f9b57;
 }
 
 .project-folder {
@@ -297,10 +309,10 @@ button.project-heading.active {
   width: 100%;
   min-height: 34px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 0 10px 0 42px;
   background: transparent;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--nav-muted);
   text-align: left;
 }
@@ -313,6 +325,17 @@ button.project-heading.active {
 .thread-item.active {
   color: var(--text);
   font-weight: 560;
+}
+
+.thread-item.running {
+  border: 1px solid color-mix(in srgb, #2f9b57 48%, var(--line));
+  background: color-mix(in srgb, #2f9b57 8%, transparent);
+  color: var(--text);
+}
+
+.thread-item.running .thread-time {
+  color: #236f3f;
+  font-weight: 600;
 }
 
 .thread-title {
@@ -346,7 +369,7 @@ button.project-heading.active {
 
 .workspace {
   display: grid;
-  grid-template-rows: 52px minmax(0, 1fr);
+  grid-template-rows: 48px minmax(0, 1fr);
   height: 100vh;
   height: 100svh;
   min-height: 0;
@@ -360,8 +383,9 @@ button.project-heading.active {
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
-  padding: 0 18px;
+  padding: 0 16px;
   border-bottom: 1px solid var(--line);
+  background: var(--card);
 }
 
 .mobile-toggle {
@@ -382,8 +406,8 @@ h1 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 16px;
-  font-weight: 620;
+  font-size: 15px;
+  font-weight: 600;
 }
 
 p {
@@ -401,11 +425,11 @@ p {
 }
 
 .icon-button {
-  min-width: 34px;
-  height: 34px;
+  min-width: 32px;
+  height: 32px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: var(--card);
+  background: var(--soft);
   color: var(--muted);
 }
 
@@ -440,7 +464,7 @@ body.hide-artifacts .artifact-panel {
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 34px clamp(22px, 8vw, 160px) 24px;
+  padding: 28px clamp(22px, 8vw, 136px) 20px;
   touch-action: pan-y;
   -webkit-overflow-scrolling: touch;
 }
@@ -448,9 +472,9 @@ body.hide-artifacts .artifact-panel {
 .entry {
   display: grid;
   grid-template-columns: 30px minmax(0, 1fr) auto;
-  gap: 12px;
+  gap: 10px;
   max-width: 960px;
-  margin: 0 auto 24px;
+  margin: 0 auto 20px;
   color: var(--entry);
 }
 
@@ -472,11 +496,11 @@ body.hide-artifacts .artifact-panel {
 }
 
 .entry.user .entry-body {
-  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
-  border-radius: 16px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
   padding: 14px 16px;
-  background: color-mix(in srgb, var(--accent) 7%, var(--card));
-  box-shadow: 0 8px 18px color-mix(in srgb, var(--accent) 8%, transparent);
+  background: color-mix(in srgb, var(--soft) 72%, var(--card));
+  box-shadow: none;
 }
 
 .entry-body {
@@ -678,9 +702,7 @@ body.hide-artifacts .artifact-panel {
 }
 
 .entry-tools {
-  min-width: 42px;
-  color: var(--muted);
-  font-size: 14px;
+  display: none;
 }
 
 .approval {
@@ -708,16 +730,16 @@ body.hide-artifacts .artifact-panel {
   align-items: center;
   gap: 9px;
   width: min(860px, calc(100% - 48px));
-  min-height: 34px;
+  min-height: 32px;
   margin: 0 auto 10px;
   border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 0 14px;
-  background: var(--card);
+  border-radius: 12px;
+  padding: 0 12px;
+  background: var(--soft);
   color: var(--muted);
-  box-shadow: 0 8px 18px color-mix(in srgb, var(--text) 5%, transparent);
-  font-size: 13px;
-  font-weight: 620;
+  box-shadow: none;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .run-state-dot {
@@ -813,10 +835,10 @@ body.hide-artifacts .artifact-panel {
   position: relative;
   flex: 0 0 auto;
   width: min(860px, calc(100% - 48px));
-  min-height: 116px;
+  min-height: 112px;
   margin: 0 auto 20px;
   border: 1px solid var(--composer-border);
-  border-radius: 22px;
+  border-radius: 18px;
   background: var(--composer-bg);
   box-shadow: var(--composer-shadow);
   overflow: visible;
@@ -909,9 +931,9 @@ textarea::placeholder {
 .stop-button,
 .thinking-button,
 .voice-button {
-  min-height: 38px;
+  min-height: 36px;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 12px;
   padding: 0 12px;
   background: var(--soft);
   color: var(--nav-text);
@@ -946,7 +968,7 @@ textarea::placeholder {
   gap: 6px;
   color: var(--nav-text);
   white-space: nowrap;
-  max-width: 132px;
+  max-width: 168px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -1073,8 +1095,8 @@ textarea::placeholder {
 .send-button {
   display: grid;
   place-items: center;
-  width: 44px;
-  height: 44px;
+  width: 42px;
+  height: 42px;
   border: 0;
   border-radius: 50%;
   background: var(--button);
@@ -1089,8 +1111,8 @@ textarea::placeholder {
 .artifact-panel {
   display: grid;
   align-content: start;
-  gap: 16px;
-  padding: 18px;
+  gap: 12px;
+  padding: 14px;
   border-left: 1px solid var(--line);
   background: var(--panel);
   overflow-y: auto;
@@ -1098,11 +1120,11 @@ textarea::placeholder {
 
 .panel-card {
   min-width: 0;
-  padding: 16px;
+  padding: 14px;
   border: 1px solid var(--line);
-  border-radius: 18px;
+  border-radius: 12px;
   background: var(--card);
-  box-shadow: 0 8px 22px color-mix(in srgb, var(--text) 5%, transparent);
+  box-shadow: none;
 }
 
 .panel-title {
@@ -1148,8 +1170,8 @@ textarea::placeholder {
   width: 100%;
   min-height: 34px;
   border: 0;
-  border-radius: 8px;
-  padding: 7px 8px;
+  border-radius: 10px;
+  padding: 8px 10px;
   background: transparent;
   color: var(--text);
   text-align: left;
@@ -1425,7 +1447,7 @@ textarea::placeholder {
 
 .artifact-preview {
   min-width: 0;
-  max-height: 360px;
+  max-height: 420px;
   overflow: auto;
   margin: 8px 0 0;
   overflow-wrap: anywhere;
@@ -1892,14 +1914,14 @@ textarea::placeholder {
 
   .composer {
     width: calc(100% - 18px);
-    min-height: 84px;
+    min-height: 88px;
     margin-bottom: max(7px, env(safe-area-inset-bottom));
-    border-radius: 17px;
+    border-radius: 16px;
   }
 
   .run-state {
     width: calc(100% - 18px);
-    min-height: 30px;
+    min-height: 28px;
     margin-bottom: 7px;
     padding: 0 11px;
     font-size: 12px;
@@ -2111,7 +2133,7 @@ textarea::placeholder {
   }
 
   .model-button {
-    max-width: none;
+    max-width: 100%;
     justify-content: center;
   }
 

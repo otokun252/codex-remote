@@ -74,6 +74,7 @@ let selectedThreadRefreshActive = false;
 let selectedModel = localStorage.getItem("codexPhoneModel") || "";
 let selectedModelLabel = localStorage.getItem("codexPhoneModelLabel") || "5.5";
 let selectedReasoning = localStorage.getItem("codexPhoneReasoning") || "中";
+let selectedSpeed = localStorage.getItem("codexPhoneSpeed") || "通常";
 let settingsRenderSeq = 0;
 let artifactItems = [];
 let activeArtifactPath = "";
@@ -140,9 +141,22 @@ const accessModes = [
 ];
 
 function updateModelButton() {
-  modelButton.textContent = `${selectedModelLabel} / ${selectedReasoning}`;
+  modelButton.textContent = `${selectedModelLabel} / ${selectedReasoning} / ${selectedSpeed}`;
   for (const row of modelMenu.querySelectorAll("[data-reasoning]")) {
     const active = row.dataset.reasoning === selectedReasoning;
+    row.classList.toggle("active", active);
+    let mark = row.querySelector(".checkmark");
+    if (active && !mark) {
+      mark = document.createElement("span");
+      mark.className = "checkmark";
+      mark.textContent = "✓";
+      row.appendChild(mark);
+    } else if (!active && mark) {
+      mark.remove();
+    }
+  }
+  for (const row of modelMenu.querySelectorAll("[data-speed]")) {
+    const active = row.dataset.speed === selectedSpeed;
     row.classList.toggle("active", active);
     let mark = row.querySelector(".checkmark");
     if (active && !mark) {
@@ -174,6 +188,36 @@ function selectReasoning(value) {
   updateModelButton();
   closeModelMenu();
   addStatus(`思考量を ${value} に設定しました。`);
+}
+
+function selectSpeed(value) {
+  selectedSpeed = value;
+  localStorage.setItem("codexPhoneSpeed", value);
+  updateModelButton();
+  closeModelMenu();
+  addStatus(`速度を ${value} に設定しました。`);
+}
+
+function normalizeReasoningEffort(value) {
+  const clean = String(value || "").trim();
+  if (clean === "低") return "low";
+  if (clean === "中") return "medium";
+  if (clean === "高") return "high";
+  if (clean === "非常に高") return "xhigh";
+  return "medium";
+}
+
+function effectiveReasoningEffort() {
+  const levels = ["low", "medium", "high", "xhigh"];
+  let index = levels.indexOf(normalizeReasoningEffort(selectedReasoning));
+  if (index < 0) index = 1;
+  if (selectedSpeed === "高速") index = Math.max(0, index - 1);
+  if (selectedSpeed === "丁寧") index = Math.min(levels.length - 1, index + 1);
+  return levels[index];
+}
+
+function threadQueryParam() {
+  return selectedThread ? `?thread=${encodeURIComponent(selectedThread)}` : "";
 }
 
 function selectModel(model) {
@@ -241,6 +285,12 @@ function normalizeImageHref(value) {
   const clean = String(value || "").replace(/^\.\//, "");
   if (clean.startsWith("/api/file/raw") || clean.startsWith("/api/uploaded")) return urlWithToken(clean);
   const localPath = clean.replace(/[?#].*$/, "");
+  if (
+    /^[a-z]:[\\/]/i.test(localPath) &&
+    /(?:^|[\\/])\.codex[\\/]generated_images[\\/].+\.(?:png|jpe?g|gif|webp|svg)$/i.test(localPath)
+  ) {
+    return urlWithToken(`/api/codex-generated-image?path=${encodeURIComponent(localPath)}`);
+  }
   const repoImage = localPath.match(/(?:^|[/\\])(docs[/\\](?:assets|public)[/\\].+\.(?:png|jpe?g|gif|webp|svg))$/i);
   if (repoImage) {
     const relativeAsset = repoImage[1].replace(/\\/g, "/");
@@ -265,13 +315,15 @@ function sanitizeMarkdownHtml(html) {
     "DETAILS",
     "DIV",
     "EM",
+    "FIGCAPTION",
+    "FIGURE",
     "H1",
     "H2",
     "H3",
     "H4",
     "H5",
     "H6",
-    "画像",
+    "IMG",
     "KBD",
     "P",
     "PRE",
@@ -515,6 +567,25 @@ function renderImageGallery(images = []) {
   return gallery;
 }
 
+function extractAssistantImageRefs(text = "") {
+  const matches = new Set();
+  const source = String(text || "");
+  const patterns = [
+    /(?:docs\/assets|tmp\/generated-images|tmp\/workflow-screenshots|tmp\/screen-captures)\/[^\s"'`<>]+\.(?:png|jpe?g|gif|webp|svg)/gi,
+    /[a-z]:(?:[\\/][^\s"'`<>]+)+\.(?:png|jpe?g|gif|webp|svg)/gi,
+    /\/api\/(?:file\/raw|uploaded)\?[^\s"'`<>]+/gi,
+  ];
+  for (const pattern of patterns) {
+    for (const match of source.matchAll(pattern)) {
+      matches.add(match[0]);
+    }
+  }
+  return [...matches].map((value) => ({
+    name: value.split(/[\\/]/).pop(),
+    url: normalizeImageHref(value),
+  }));
+}
+
 function summarizeStatus(items) {
   if (items.some((item) => item.includes("音声入力"))) return "音声入力";
   const reads = items.filter((item) => /^Read\s+/i.test(item)).length;
@@ -592,7 +663,12 @@ function addEntry(kind, text, images = []) {
   const body = document.createElement("div");
   body.className = "entry-body";
   setEntryText(body, kind, text);
-  const gallery = kind === "user" ? renderImageGallery(images) : null;
+  const gallery =
+    kind === "user"
+      ? renderImageGallery(images)
+      : kind === "assistant"
+        ? renderImageGallery(extractAssistantImageRefs(text))
+        : null;
   if (gallery) body.appendChild(gallery);
 
   const tools = document.createElement("div");
@@ -631,7 +707,7 @@ function ensureComposerActionButtons() {
     followUpButton.type = "button";
     followUpButton.className = "secondary-action-button tool-button";
     followUpButton.id = "followUpButton";
-    followUpButton.textContent = "追記";
+    followUpButton.textContent = "追加";
     followUpButton.title = "続けて送る";
     right.insertBefore(followUpButton, stopButton || modelButton || sendButton);
   }
@@ -640,7 +716,7 @@ function ensureComposerActionButtons() {
     interruptButton.type = "button";
     interruptButton.className = "secondary-action-button interrupt tool-button";
     interruptButton.id = "interruptButton";
-    interruptButton.textContent = "割込";
+    interruptButton.textContent = "停止して送る";
     interruptButton.title = "いまの処理を止めて送る";
     right.insertBefore(interruptButton, stopButton || modelButton || sendButton);
   }
@@ -672,6 +748,7 @@ function sendComposerMessage(type = "prompt") {
       attachments: pendingFiles,
       options: {
         model: selectedModel || undefined,
+        reasoningEffort: effectiveReasoningEffort(),
         approvalPolicy: accessMode.approvalPolicy,
         sandboxMode: accessMode.sandboxMode,
       },
@@ -682,10 +759,10 @@ function sendComposerMessage(type = "prompt") {
   renderAttachments();
   if (type === "interrupt") {
     pendingFollowUpPreview = previewText(displayText);
-    addStatus(`割り込み送信: ${pendingFollowUpPreview}`);
+    addStatus(`停止して送信: ${pendingFollowUpPreview}`);
   } else if (type === "followup") {
     pendingFollowUpPreview = previewText(displayText);
-    addStatus(`追記を送信: ${pendingFollowUpPreview}`);
+    addStatus(`追加を送信: ${pendingFollowUpPreview}`);
   }
   liveTurnActive = true;
   updateStopButton();
@@ -698,7 +775,7 @@ function updateComposerActions() {
   const hasDraft = Boolean(promptInput?.value.trim() || pendingFiles.length);
   if (sendButton) {
     sendButton.disabled = !connected;
-    sendButton.title = liveTurnActive ? "追記を送る" : "送信";
+    sendButton.title = liveTurnActive ? "追加で送る" : "送信";
     if (sendButton.innerHTML !== defaultSendButtonLabel) sendButton.innerHTML = defaultSendButtonLabel;
   }
   if (followUpButton) {
@@ -761,6 +838,11 @@ function renderThreadList() {
 
     const heading = document.createElement("div");
     heading.className = "project-heading";
+    const projectRunning = threads.some((thread) => thread.runtime?.active);
+    if (projectRunning) {
+      heading.classList.add("running");
+      heading.title = "作業中";
+    }
     const folder = document.createElement("span");
     folder.className = "project-folder";
     const name = document.createElement("span");
@@ -773,13 +855,14 @@ function renderThreadList() {
       const item = document.createElement("button");
       item.type = "button";
       item.className = thread.id === selectedThread ? "thread-item active" : "thread-item";
+      if (thread.runtime?.active) item.classList.add("running");
       item.title = titleForThread(thread);
       const title = document.createElement("span");
       title.className = "thread-title";
       title.textContent = titleForThread(thread);
       const time = document.createElement("span");
       time.className = "thread-time";
-      time.textContent = formatRelativeTime(thread.updatedAt || thread.createdAt);
+      time.textContent = thread.runtime?.active ? "作業中" : formatRelativeTime(thread.updatedAt || thread.createdAt);
       item.append(title, time);
       item.addEventListener("click", () => selectThread(thread.id));
       group.appendChild(item);
@@ -926,7 +1009,7 @@ async function refreshSelectedThread() {
 async function loadArtifacts() {
   if (!token) return;
   try {
-    const result = await apiGet("/api/artifacts");
+    const result = await apiGet(`/api/artifacts${threadQueryParam()}`);
     renderArtifactIndex(result.data || []);
   } catch (error) {
     addEntry("error", `artifact一覧を読めませんでした: ${error.message}`);
@@ -948,19 +1031,25 @@ function updateUrlThread() {
 function syncReadyThread(threadId) {
   if (!threadId || selectedThread === threadId) return;
   selectedThread = threadId;
+  activeFolderPath = "";
+  activeArtifactPath = "";
   updateUrlThread();
   const selected = threadCache.find((thread) => thread.id === selectedThread);
   threadTitle.textContent = selected ? titleForThread(selected) : selectedThread;
   renderThreadList();
+  loadArtifacts();
 }
 
 function selectThread(threadId) {
   selectedThread = threadId;
+  activeFolderPath = "";
+  activeArtifactPath = "";
   if (selectedThread) localStorage.setItem("codexPhoneLastThread", selectedThread);
   else localStorage.removeItem("codexPhoneLastThread");
   updateUrlThread();
   renderThreadList();
   document.body.classList.remove("show-sidebar");
+  loadArtifacts();
   connect();
 }
 
@@ -1175,7 +1264,10 @@ async function showFolder(path = activeFolderPath || "") {
   artifactPreview.textContent = "";
   addPanelRow("読み込み中...", path || "作業フォルダ");
   try {
-    const result = await apiGet(`/api/files?path=${encodeURIComponent(path || "")}`);
+    const query = new URLSearchParams();
+    query.set("path", path || "");
+    if (selectedThread) query.set("thread", selectedThread);
+    const result = await apiGet(`/api/files?${query.toString()}`);
     activeFolderPath = result.path || "";
     artifactTitle.textContent = activeFolderPath ? `フォルダ: ${activeFolderPath}` : "フォルダ";
     artifactList.replaceChildren();
@@ -1765,7 +1857,10 @@ async function showArtifact(path) {
     <p>読み込み中...</p>
   `;
   try {
-    const result = await apiGet(`/api/file?path=${encodeURIComponent(path)}`);
+    const query = new URLSearchParams();
+    query.set("path", path);
+    if (selectedThread) query.set("thread", selectedThread);
+    const result = await apiGet(`/api/file?${query.toString()}`);
     setArtifactPreview(result);
     artifactPreview.classList.remove("hidden");
   } catch (error) {
@@ -1911,6 +2006,15 @@ function connect({ automatic = false } = {}) {
         });
         addStatus(msg.artifact.type === "screenshot" ? "スクショを受け取りました。" : "画像を受け取りました。");
       }
+      return;
+    }
+    if (msg.type === "queued") {
+      setRunState("running", msg.mode === "interrupt" ? "停止して次を準備中" : "追加指示を受付中");
+      addStatus(
+        msg.mode === "interrupt"
+          ? `割り込みを最優先で準備しました${msg.replaced ? `。前の追加 ${msg.replaced} 件は置き換えています` : ""}: ${previewText(msg.text)}`
+          : `追加を受け付けました: ${previewText(msg.text)}`,
+      );
       return;
     }
     if (msg.type === "user") {
@@ -2094,6 +2198,11 @@ modelMenu.addEventListener("click", (event) => {
     selectReasoning(reasoningRow.dataset.reasoning);
     return;
   }
+  const speedRow = event.target.closest("[data-speed]");
+  if (speedRow) {
+    selectSpeed(speedRow.dataset.speed);
+    return;
+  }
   const modelRow = event.target.closest("[data-model-choice]");
   if (modelRow) {
     selectModel(modelRow.dataset.modelChoice);
@@ -2123,10 +2232,14 @@ webSearchButton.addEventListener("click", () => {
 });
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "visible") return;
-  if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) connect({ automatic: true });
-  loadThreads({ background: true }).catch(() => {});
-  refreshSelectedThread();
-  loadArtifacts();
+  restoreSessionState()
+    .catch(() => {})
+    .finally(() => {
+      if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) connect({ automatic: true });
+      loadThreads({ background: true }).catch(() => {});
+      refreshSelectedThread();
+      loadArtifacts();
+    });
 });
 for (const button of artifactButtons) {
   button.addEventListener("click", () => {

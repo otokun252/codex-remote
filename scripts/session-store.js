@@ -150,16 +150,19 @@ class SessionStore {
   }
 
   addArtifact(sessionId, artifact) {
+    const previousGlobal = this.state.artifacts.find((item) => item.path === artifact.path) || null;
     const normalized = {
-      id: artifact.id || crypto.randomUUID(),
+      id: previousGlobal?.id || artifact.id || crypto.randomUUID(),
       sessionId: sessionId || "",
       type: artifact.type || "file",
       path: artifact.path,
       name: artifact.name || path.basename(artifact.path || ""),
       url: artifact.url || "",
-      createdAt: artifact.createdAt || now(),
+      createdAt: previousGlobal?.createdAt || artifact.createdAt || now(),
     };
     if (!normalized.path) return null;
+    const unchanged =
+      Boolean(previousGlobal) && previousGlobal.url === normalized.url && previousGlobal.type === normalized.type;
     this.state.artifacts = [normalized, ...this.state.artifacts.filter((item) => item.path !== normalized.path)].slice(0, 200);
     if (sessionId) {
       const existing = this.state.sessions[sessionId] || { id: sessionId, createdAt: now(), status: "starting", history: [], artifacts: [] };
@@ -167,7 +170,7 @@ class SessionStore {
       this.state.sessions[sessionId] = { ...existing, artifacts, updatedAt: now() };
     }
     this.save();
-    return clone(normalized);
+    return clone({ ...normalized, unchanged });
   }
 
   getSession(sessionId) {
