@@ -79,6 +79,7 @@ let settingsRenderSeq = 0;
 let artifactItems = [];
 let activeArtifactPath = "";
 let activeFolderPath = "";
+let currentArtifactResult = null;
 let accessMode = {
   label: "フルアクセス",
   approvalPolicy: "never",
@@ -1291,6 +1292,7 @@ async function showFolder(path = activeFolderPath || "") {
 
 function hideArtifactPreview() {
   activeArtifactPath = "";
+  currentArtifactResult = null;
   renderArtifactRows();
   artifactPreview.className = "artifact-preview hidden";
   artifactPreview.textContent = "";
@@ -1878,6 +1880,7 @@ async function showArtifact(path) {
 }
 
 function setArtifactPreview(result) {
+  currentArtifactResult = result;
   const isImage = result.kind === "image";
   const isMarkdown = result.kind === "markdown" || /\.md(?:own)?$/i.test(result.path);
   artifactPreview.classList.toggle("image-artifact-preview", isImage);
@@ -1895,9 +1898,57 @@ function setArtifactPreview(result) {
     artifactPreview.appendChild(gallery);
     return;
   }
-  artifactPreview.innerHTML = `${header}${
+  const editAction = result.editable ? `<button type="button" class="artifact-preview-close" data-edit-file>編集</button>` : "";
+  const textHeader = `
+    <div class="artifact-preview-header">
+      <div class="artifact-preview-title">${escapeHtml(result.path)}</div>
+      <div class="artifact-preview-actions">
+        ${editAction}
+        <button type="button" class="artifact-preview-close" data-preview-close>閉じる</button>
+      </div>
+    </div>
+  `;
+  artifactPreview.innerHTML = `${textHeader}${
     isMarkdown ? renderMarkdown(result.text, { allowHtml: true, headingOffset: 0 }) : `<pre><code>${escapeHtml(result.text)}</code></pre>`
   }`;
+}
+
+function startArtifactEdit() {
+  if (!currentArtifactResult?.editable) return;
+  artifactPreview.classList.remove("markdown-preview", "plain-preview", "image-artifact-preview");
+  artifactPreview.classList.add("file-editor-preview");
+  artifactPreview.innerHTML = `
+    <div class="artifact-preview-header">
+      <div class="artifact-preview-title">${escapeHtml(currentArtifactResult.path)}</div>
+      <div class="artifact-preview-actions">
+        <button type="button" class="artifact-preview-close" data-cancel-edit>取消</button>
+        <button type="button" class="artifact-preview-close primary" data-save-file>保存</button>
+      </div>
+    </div>
+    <textarea class="file-editor-textarea" spellcheck="false">${escapeHtml(currentArtifactResult.text || "")}</textarea>
+  `;
+  artifactPreview.querySelector(".file-editor-textarea")?.focus();
+}
+
+async function saveArtifactEdit() {
+  if (!currentArtifactResult?.editable) return;
+  const textarea = artifactPreview.querySelector(".file-editor-textarea");
+  const nextText = textarea?.value ?? "";
+  const saveButton = artifactPreview.querySelector("[data-save-file]");
+  if (saveButton) saveButton.disabled = true;
+  try {
+    const result = await apiPost("/api/file/save", {
+      path: currentArtifactResult.path,
+      text: nextText,
+      modifiedAt: currentArtifactResult.modifiedAt,
+      thread: selectedThread || undefined,
+    });
+    setArtifactPreview(result);
+    addStatus(`保存しました: ${result.path}`);
+  } catch (error) {
+    addEntry("error", `保存に失敗しました: ${error.message}`);
+    if (saveButton) saveButton.disabled = false;
+  }
 }
 
 function renderAttachments() {
@@ -2154,6 +2205,9 @@ menuButton.addEventListener("click", () => {
 closePanelButton.addEventListener("click", closeRightPanel);
 artifactPreview.addEventListener("click", (event) => {
   if (event.target.closest("[data-preview-close]")) hideArtifactPreview();
+  if (event.target.closest("[data-edit-file]")) startArtifactEdit();
+  if (event.target.closest("[data-cancel-edit]")) setArtifactPreview(currentArtifactResult);
+  if (event.target.closest("[data-save-file]")) saveArtifactEdit();
 });
 addButton.addEventListener("click", () => fileInput.click());
 imageButton.addEventListener("click", () => {

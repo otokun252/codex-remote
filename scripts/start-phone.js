@@ -509,6 +509,12 @@ function isTextLikePath(filePath) {
   );
 }
 
+function canEditTextFile(target, baseDir = root) {
+  if (!target || !isSafeBrowsablePath(target, baseDir) || !fs.existsSync(target) || !fs.statSync(target).isFile()) return false;
+  if (!isTextLikePath(target)) return false;
+  return fs.statSync(target).size <= 200_000;
+}
+
 function listFolderEntries(baseDir, folderPath = "") {
   const targetDir = safeRelativePath(folderPath || ".", baseDir);
   if (!targetDir || !fs.existsSync(targetDir) || !fs.statSync(targetDir).isDirectory() || !isSafeBrowsablePath(targetDir, baseDir)) {
@@ -808,7 +814,7 @@ function readRequestJson(req) {
     let body = "";
     req.on("data", (chunk) => {
       body += chunk.toString();
-      if (body.length > 20_000) {
+      if (body.length > 300_000) {
         reject(new Error("request body too large"));
         req.destroy();
       }
@@ -2006,8 +2012,51 @@ async function main() {
       sendJson(res, 200, {
         path: path.relative(baseDir, target).replace(/\\/g, "/"),
         kind: /\.md(?:own)?$/i.test(target) ? "markdown" : "text",
+        editable: canEditTextFile(target, baseDir),
+        modifiedAt: fs.statSync(target).mtime.toISOString(),
         text: fs.readFileSync(target, "utf8").slice(0, 80_000),
       });
+      return;
+    }
+    if (url.pathname === "/api/file/save") {
+      if (req.method !== "POST") {
+        sendJson(res, 405, { error: "method not allowed" });
+        return;
+      }
+      if (!requireToken(url, phoneToken, res)) return;
+      try {
+        const body = await readRequestJson(req);
+        const baseDir = resolveArtifactBaseFromUrl(url) || artifactBaseDir(await resolveThreadCwd(body.thread || url.searchParams.get("thread")));
+        const target = safeRelativePath(body.path, baseDir);
+        if (!canEditTextFile(target, baseDir)) {
+          sendJson(res, 415, { error: "this file cannot be edited from phone" });
+          return;
+        }
+        const text = String(body.text ?? "");
+        if (Buffer.byteLength(text, "utf8") > 200_000) {
+          sendJson(res, 413, { error: "file is too large for phone editing" });
+          return;
+        }
+        const before = fs.statSync(target);
+        if (body.modifiedAt && new Date(body.modifiedAt).getTime() !== before.mtime.getTime()) {
+          sendJson(res, 409, { error: "file changed on PC; reopen it before saving" });
+          return;
+        }
+        fs.writeFileSync(target, text, "utf8");
+        const after = fs.statSync(target);
+        const relativePath = path.relative(baseDir, target).replace(/\\/g, "/");
+        sendJson(res, 200, {
+          ok: true,
+          path: relativePath,
+          kind: /\.md(?:own)?$/i.test(target) ? "markdown" : "text",
+          editable: true,
+          modifiedAt: after.mtime.toISOString(),
+          size: after.size,
+          text: fs.readFileSync(target, "utf8").slice(0, 80_000),
+        });
+      } catch (error) {
+        sendJson(res, 500, { error: error.message });
+      }
       return;
     }
     serveStatic(req, res);

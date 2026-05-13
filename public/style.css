@@ -1438,6 +1438,38 @@ textarea::placeholder {
   color: var(--accent);
 }
 
+.artifact-preview-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.artifact-preview-close.primary {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+  background: color-mix(in srgb, var(--accent) 14%, var(--card));
+  color: var(--accent);
+}
+
+.file-editor-preview {
+  max-height: none;
+}
+
+.file-editor-textarea {
+  width: 100%;
+  min-height: min(58vh, 620px);
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+  background: var(--code-bg);
+  color: var(--entry);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre;
+  overflow: auto;
+}
+
 .terminal-row,
 .source-row {
   color: var(--nav-muted);
