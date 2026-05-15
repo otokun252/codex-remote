@@ -1,154 +1,159 @@
-﻿# Codex Remote
+# Codex Remote
 
-Codex CLIの `codex remote-control` を、スマホから扱いやすくするためのリポジトリです。
+Codex Remote is a local-first web app that lets a user control **their own PC's Codex** from a phone.
 
-スマホから、自分のPCで動いているCodexを操作するためのWebアプリです。
+Each user runs the bridge on their own Windows PC. The phone UI is only a remote control screen. Codex execution, local files, browser sessions, screenshots, and generated artifacts stay on that user's PC.
 
-スマホは操作画面だけです。実行本体、ローカルファイル、Chrome、画像、スクリーンショット、Codexの作業は、すべて利用者本人のPC側で動きます。
+## What This Is
 
-## できること
+- Phone-friendly PWA for sending instructions to Codex
+- Local PC bridge for Codex app-server
+- QR pairing for the phone
+- Saved connection profile on the phone for return access
+- WebSocket live output
+- Multi-device viewing on the same Bridge
+- Screenshot and image artifact preview on the phone
+- Folder/artifact browsing from the phone
+- Optional X/note local publishing workflows
+- GitHub-based install and update flow
 
-- スマホからCodexへ指示を送る
-- PC側Codexの出力をリアルタイム表示する
-- 画像やスクリーンショットをスマホ側で見る
-- スマホからフォルダや成果物を確認する
-- PWAとしてホーム画面に追加する
-- X、X Articles、noteのローカル投稿ワークフローを使う
-- agentmemoryを使ってCodexにローカル長期記憶を追加する
-- GitHubから更新する
+## Privacy Model
 
-## 重要な考え方
+This repository must not contain a real user's private account names, tokens, local paths, screenshots, or credentials.
 
-このリポジトリを使う人は、それぞれ自分のPCに入れて構築します。
+Local-only files are ignored by Git:
 
-あなたのPCやアカウントを他人が使う形ではありません。GitHubのリンクは、他の人にあなたの実行中URLを渡すためではなく、その人が自分のPCに同じ仕組みを作るための入口です。
+- `.env`
+- `.phone-token`
+- `.uploads/`
+- `.x-profiles/`
+- `tmp/`
+- `connection.html`
+- `connection.txt`
+- `connection-qr*.png`
+- `config/x-accounts.local.json`
 
-```text
-スマホ
-  -> token付きの外用URL
-  -> 利用者本人のPC内のBridge
-  -> 利用者本人のCodex
-```
+For X/note workflows, copy `config/x-accounts.example.json` to `config/x-accounts.local.json` and put each user's own account/profile mapping there. Do not commit that local file.
 
-`start.bat` はCloudflare Quick Tunnelを使い、外から使えるURLだけを表示します。
-
-## 必要なもの
+## Requirements
 
 - Windows 10/11
 - Node.js LTS
 - Git
-- Codex CLIにログイン済みのPC
-- スマホ
+- Codex CLI login on that PC
+- A phone browser, preferably installed to the home screen as a PWA
 
-## インストール
+## Install From GitHub
+
+Replace the repository URL with your public GitHub repository URL.
 
 ```powershell
-git clone https://github.com/otokun252/codex-remote.git
-cd codex-remote
+git clone https://github.com/YOUR_ORG/YOUR_REPO.git
+cd YOUR_REPO
 setup.bat
 ```
 
-## 起動
+If Windows blocks the script, run PowerShell as the user and execute:
 
 ```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-windows.ps1
+```
+
+## Start
+
+Double-click:
+
+```text
 start.bat
 ```
 
-QRコードとURLが表示されます。スマホで読み込んでください。
+The start window must stay open while using Codex Remote. A QR code and URL will appear.
 
-起動中はPC側の起動画面を閉じないでください。PC側が止まると、スマホ側からも操作できません。
+By default `start.bat` uses a Cloudflare Quick Tunnel so the phone can connect from outside the local network. Same-Wi-Fi URLs are not shown or required. Quick Tunnel URLs can change after restart. For a stable customer setup, configure a fixed Cloudflare Named Tunnel or another fixed public URL.
 
-## Codex remote-control について
+## Phone Setup
 
-このプロジェクトは、Codex CLIの `remote-control` 系の使い方をスマホから扱いやすくするための構成です。
+1. Start the bridge on the PC.
+2. Scan the QR code from the phone.
+3. Open the phone UI.
+4. Add it to the home screen.
+5. Next time, open it from the home screen.
 
-確認:
+If the PC bridge is stopped, the phone will show a disconnected/reconnecting state. Start the bridge again on the PC.
 
-```powershell
-npm run help:remote-control
-npm run codex:remote-control
-```
+The phone is only the control screen. Execution stays on the Windows PC. If the phone drops offline, the PC-side Codex run can continue and the phone can resync after reconnect.
 
-現在のスマホBridgeは、安定してスマホUIへ接続するためにローカルのCodex WebSocket互換接続を使います。`codex remote-control` を直接使いたい場合は、`.env` で次を試せます。
+## Reconnect Behavior
+
+- If the phone connection drops but the same Bridge URL is still alive, the app reconnects automatically.
+- If the PC Bridge is restarted and the Quick Tunnel URL changes, the old URL cannot magically recover. Scan the new QR or open the new URL from the PC.
+- Fixed URL mode is recommended for repeat use, PWA home-screen reopen, and customer distribution.
+
+## Multi-Device Use
+
+- Multiple devices can connect to the same PC Bridge at the same time.
+- One device can send prompts while another watches output.
+- Approval requests are shared; the first approve/decline wins and the other devices are updated.
+- Device presence is shown in the phone UI and in `connection.html`.
+
+## Update
+
+Double-click:
 
 ```text
-CODEX_LAUNCH_MODE=remote-control
-```
-
-ただし環境によってはCodex公式側のremote-control登録が失敗することがあります。その場合は既定の `CODEX_LAUNCH_MODE=app-server` に戻してください。
-
-## スマホで使う流れ
-
-1. PCで `start.bat` を起動する
-2. 表示されたQRコードをスマホで読み込む
-3. スマホで画面を開く
-4. ホーム画面に追加する
-5. 次回からホーム画面から開く
-
-## 更新
-
-```powershell
 update.bat
 ```
 
-GitHubから最新版を取得し、必要な依存関係を更新します。
+Or run:
 
-`.env`、`.phone-token`、`config/x-accounts.local.json` などのローカル設定はGitに入らないため、更新しても残ります。
+```powershell
+npm run update:windows
+```
 
-## 固定URLで使う場合
+The update command pulls the latest GitHub version, installs dependencies, and runs verification. Local tokens and account mappings are preserved because they are ignored by Git.
 
-Quick TunnelのURLは再起動で変わることがあります。商品として継続利用する場合は、Cloudflare Named Tunnelなどで固定URLを用意してください。
+## Optional: Start Automatically With Windows
 
-`.env` に例のように設定します。
+After setup, run:
 
-```text
+```powershell
+npm run phone:install-startup
+```
+
+This registers a Windows Scheduled Task that starts the product bridge at logon.
+
+## Fixed URL Setup
+
+For a stable QR and home-screen icon, set these environment variables in `.env`:
+
+```env
 PHONE_PRODUCT_MODE=1
 PHONE_TOKEN=replace-with-a-long-random-secret
 PHONE_PUBLIC_URL=https://your-fixed-domain.example.com
 PHONE_UI_PORT=45214
 PHONE_BIND_HOST=127.0.0.1
 CODEX_MODEL=gpt-5.4
-PHONE_AUTO_PORT=1
 ```
 
-起動:
+Then start:
 
 ```powershell
 npm run phone:product
 ```
 
-日常利用では監視付き起動を使います。Bridgeが落ちた場合、自動で再起動します。
+Quick Tunnel is good for testing. A fixed URL is better for ongoing use.
 
-```powershell
-start-product.bat
-```
+## Optional X/note Workflows
 
-固定URLの `.env` は次のコマンドでも作れます。
+These workflows are local to the user's PC and use that user's Chrome/profile.
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\configure-fixed-url.ps1 -PublicUrl https://your-fixed-domain.example.com
-```
-
-Windowsログオン時に自動起動する場合:
-
-```powershell
-npm run phone:install-startup
-```
-
-通常起動では、古いプロセスが残ってポートが塞がっていても、自動で空きポートを探します。
-固定URLで使う本番モードでは、スマホの入口を勝手に変えないため、`PHONE_UI_PORT` が塞がっている場合は起動を止めます。
-
-詳しい固定URL手順は [docs/fixed-url-ja.md](docs/fixed-url-ja.md) を見てください。
-
-## X/note機能
-
-X、X Articles、noteのワークフローは任意機能です。利用者ごとにローカル設定を作ります。
+1. Copy the example config:
 
 ```powershell
 copy config\x-accounts.example.json config\x-accounts.local.json
 ```
 
-例:
+2. Edit `config/x-accounts.local.json`:
 
 ```json
 {
@@ -159,44 +164,35 @@ copy config\x-accounts.example.json config\x-accounts.local.json
 }
 ```
 
-`config/x-accounts.local.json` はGitHubに公開しないでください。
-
-## agentmemory
-
-agentmemoryを使うと、Codexが過去の作業や判断を思い出しやすくなります。
-
-起動:
+3. Use the phone UI or commands such as:
 
 ```powershell
-start-memory.bat
+npm run x:post -- --account main --text "Hello"
+npm run note:draft -- --account main --title "Title" --body "Body"
 ```
 
-確認:
+Do not commit `config/x-accounts.local.json`.
 
-```powershell
-npm run memory:health
-```
-
-詳しくは [docs/agentmemory-ja.md](docs/agentmemory-ja.md) を見てください。
-
-## GitHubに公開しないもの
-
-- 本物のtoken
-- 本物のX/noteアカウント名
-- 個人名
-- PCのローカルパス
-- スクリーンショット
-- `.env`
-- `.phone-token`
-- `tmp/`
-- `.uploads/`
-- `config/x-accounts.local.json`
-
-## 開発者向け
+## Developer Commands
 
 ```powershell
 npm run check
 npm test
 npm run phone
+npm run phone:tunnel
 npm run phone:product
 ```
+
+## Distribution Notes
+
+For GitHub-only distribution:
+
+1. Publish this repository.
+2. Tell users to install Git, Node.js LTS, and Codex CLI.
+3. Users clone the repository.
+4. Users run `setup.bat`.
+5. Users run `start.bat`.
+6. Users scan their own QR code.
+7. Users update with `update.bat`.
+
+No shared account is required. Each user controls only their own PC's Codex.

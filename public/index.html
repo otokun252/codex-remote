@@ -11,7 +11,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Codex Remote" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="theme-color" content="#ffffff" />
+    <meta name="theme-color" content="#10211d" />
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
@@ -20,7 +20,7 @@
       <aside class="sidebar" aria-label="メニュー">
         <nav class="primary-nav">
           <button type="button" class="nav-command muted" id="workflowButton">投稿</button>
-          <button type="button" class="nav-command" id="newThread">新しく始める</button>
+          <button type="button" class="nav-command" id="newThread">新しい作業</button>
           <button type="button" class="nav-command muted" id="searchButton">履歴</button>
           <button type="button" class="nav-command muted" id="pluginsButton">プラグイン</button>
           <button type="button" class="nav-command muted" id="automationsButton">自動化</button>
@@ -41,9 +41,9 @@
             <p id="meta">接続中</p>
           </div>
           <div class="title-actions">
-            <button type="button" class="icon-button" id="previewButton" title="プレビュー" aria-label="プレビュー">□</button>
-            <button id="connect" type="button" class="icon-button" title="再接続" aria-label="再接続">↻</button>
-            <button type="button" class="icon-button" id="menuButton" title="メニュー" aria-label="メニュー">…</button>
+            <button type="button" class="icon-button" id="previewButton" title="スマホ検証" aria-label="スマホ検証">画</button>
+            <button id="connect" type="button" class="icon-button" title="再接続" aria-label="再接続">再</button>
+            <button type="button" class="icon-button" id="menuButton" title="右パネル" aria-label="右パネル">…</button>
           </div>
         </header>
 
@@ -52,12 +52,12 @@
             <div id="log" class="log" aria-live="polite"></div>
             <section id="approval" class="approval hidden">
               <div>
-                <strong>確認が必要です</strong>
-                <pre id="approvalText"></pre>
+                <strong>承認が必要です</strong>
+                <div id="approvalText" class="approval-summary"></div>
               </div>
               <div class="actions">
                 <button id="decline" type="button" class="secondary">拒否</button>
-                <button id="approve" type="button">許可</button>
+                <button id="approve" type="button">承認</button>
               </div>
             </section>
             <div id="runState" class="run-state" data-state="connecting" role="status" aria-live="polite">
@@ -65,28 +65,46 @@
               <span id="runStateLabel">接続中</span>
             </div>
             <form id="composer" class="composer">
-              <input id="fileInput" class="hidden" type="file" accept="image/*" multiple />
+              <input id="fileInput" class="hidden" type="file" accept="image/*,video/*" multiple />
               <div id="attachments" class="attachments" aria-live="polite"></div>
               <textarea id="prompt" rows="3" placeholder="Codexに頼みたいことを書く"></textarea>
+              <div id="composerUtilityTray" class="composer-utility-tray" aria-label="補助操作" aria-hidden="true">
+                <button type="button" class="tool-button tray-button" id="attachButton" title="添付" aria-label="添付">添付</button>
+                <button type="button" class="tool-button tray-button" id="workflowQuickButton" title="発信ワークフロー" aria-label="発信ワークフロー">投稿</button>
+                <button type="button" class="tool-button tray-button access-button" id="accessButton" title="権限モード" aria-label="権限モード">フルアクセス</button>
+              </div>
               <div class="composer-footer">
                 <div class="composer-left">
-                  <button type="button" class="tool-button icon-only" id="addButton" title="画像を添付" aria-label="画像を添付">＋</button>
-                  <button type="button" class="tool-button" id="imageButton" title="画像生成" aria-label="画像生成">生成</button>
-                  <button type="button" class="tool-button access-button" id="accessButton">フルアクセス</button>
+                  <button
+                    type="button"
+                    class="tool-button icon-only utility-toggle"
+                    id="addButton"
+                    title="補助操作"
+                    aria-label="補助操作"
+                    aria-expanded="false"
+                    aria-controls="composerUtilityTray"
+                  >
+                    +
+                  </button>
                 </div>
                 <div class="composer-right">
                   <button type="button" class="tool-button stop-button icon-only" id="stopButton" title="停止" aria-label="停止">■</button>
-                  <button type="button" id="modelButton" class="tool-button model-button">5.5 / 中</button>
+                  <button type="button" id="modelButton" class="tool-button model-button">5.5 / 中 / 通常</button>
                   <button type="button" class="tool-button voice-button icon-only" id="voiceButton" title="音声入力" aria-label="音声入力"></button>
                   <button id="send" type="submit" class="send-button" title="送信" aria-label="送信">↑</button>
                 </div>
               </div>
-              <div id="modelMenu" class="model-menu hidden" role="menu" aria-label="モデルと思考量">
+              <div id="modelMenu" class="model-menu hidden" role="menu" aria-label="モデルと速度">
                 <div class="model-menu-label">思考量</div>
                 <button type="button" class="model-menu-row" data-reasoning="低">低</button>
                 <button type="button" class="model-menu-row" data-reasoning="中">中<span class="checkmark">✓</span></button>
                 <button type="button" class="model-menu-row" data-reasoning="高">高</button>
                 <button type="button" class="model-menu-row" data-reasoning="非常に高">非常に高</button>
+                <div class="model-menu-separator"></div>
+                <div class="model-menu-label">速度</div>
+                <button type="button" class="model-menu-row" data-speed="高速">高速</button>
+                <button type="button" class="model-menu-row" data-speed="通常">通常<span class="checkmark">✓</span></button>
+                <button type="button" class="model-menu-row" data-speed="丁寧">丁寧</button>
                 <div class="model-menu-separator"></div>
                 <button type="button" class="model-menu-row submenu-row" data-model-choice="gpt-5.5">GPT-5.5<span class="chevron">›</span></button>
                 <button type="button" class="model-menu-row submenu-row" data-model-choice="gpt-5.4">GPT-5.4<span class="chevron">›</span></button>
@@ -95,10 +113,10 @@
             </form>
           </section>
 
-          <aside class="artifact-panel" aria-label="結果">
+          <aside class="artifact-panel" aria-label="右パネル">
             <section class="panel-card">
               <div class="panel-title">
-                <span id="artifactTitle">結果</span>
+                <span id="artifactTitle">アーティファクト</span>
                 <button type="button" class="panel-close" id="closePanelButton" title="閉じる" aria-label="閉じる">×</button>
               </div>
               <div id="artifactList">
@@ -109,22 +127,23 @@
             </section>
             <section class="panel-card">
               <div class="panel-title">
-                <span>PC側</span>
-                <span>●</span>
+                <span>PC側Bridge</span>
+                <span>補助</span>
               </div>
               <div id="terminalList">
-                <button type="button" class="terminal-row" id="statusButton">状態</button>
+                <button type="button" class="terminal-row" id="statusButton">接続情報</button>
               </div>
             </section>
             <section class="panel-card">
               <div class="panel-title">調べる</div>
-              <button type="button" class="source-row" id="webSearchButton">Webで確認</button>
+              <button type="button" class="source-row" id="webSearchButton">Webで確認する</button>
             </section>
           </aside>
         </div>
       </section>
     </main>
 
+    <script src="/bridge-client-utils.js"></script>
     <script src="/main.js"></script>
   </body>
 </html>

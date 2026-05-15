@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { notificationTargets, notifyBridgeUrls } = require("./phone-notify");
+const { notificationTargets, notifyBridgeUrls, notifyPhoneEvent } = require("./phone-notify");
 
 test("notificationTargets stays empty without opt-in environment variables", () => {
   assert.deepEqual(notificationTargets({}), []);
@@ -124,4 +124,27 @@ test("notifyBridgeUrls reports provider HTTP failures without stopping startup",
   });
 
   assert.deepEqual(results, [{ type: "pushover", ok: false, error: "Pushover returned HTTP 401" }]);
+});
+
+test("notifyPhoneEvent sends custom completion text", async () => {
+  const requests = [];
+  const results = await notifyPhoneEvent({
+    urls: ["https://remote.example.com/?token=secret"],
+    title: "Codex の処理が完了しました。",
+    body: "thread: abc123",
+    footer: "スマホで結果を確認できます。",
+    pushTitle: "Codex Remote 完了",
+    pushUrlTitle: "Codex Remote を開く",
+    env: { PHONE_PUSHOVER_TOKEN: "app", PHONE_PUSHOVER_USER: "user" },
+    fetch: async (url, options) => {
+      requests.push({ url, options });
+      return { ok: true, status: 200 };
+    },
+  });
+
+  assert.deepEqual(results, [{ type: "pushover", ok: true }]);
+  assert.equal(requests[0].options.body.get("title"), "Codex Remote 完了");
+  assert.match(requests[0].options.body.get("message"), /Codex の処理が完了しました。/);
+  assert.match(requests[0].options.body.get("message"), /thread: abc123/);
+  assert.equal(requests[0].options.body.get("url_title"), "Codex Remote を開く");
 });

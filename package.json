@@ -27,7 +27,7 @@
     "note:draft": "node scripts/note-draft.js save",
     "setup:cloudflared": "node scripts/ensure-cloudflared.js",
     "test": "node --test scripts/*.test.js",
-    "check": "node --check scripts/start-phone.js && node --check scripts/start-product.js && node --check scripts/supervise-product.js && node --check scripts/build-docs.js && node --check scripts/session-store.js && node --check scripts/probe-ws.js && node --check scripts/cloudflared-tunnel.js && node --check scripts/ensure-cloudflared.js && node --check scripts/agentmemory-health.js && node --check scripts/x-publisher.js && node --check scripts/x-article.js && node --check scripts/note-draft.js && python -m py_compile scripts/x-post-uia.py && python -m py_compile scripts/note-draft-uia.py && node --check public/main.js && node --check public/sw.js",
+    "check": "node --check scripts/start-phone.js && node --check scripts/start-product.js && node --check scripts/supervise-product.js && node --check scripts/build-docs.js && node --check scripts/session-store.js && node --check scripts/probe-ws.js && node --check scripts/cloudflared-tunnel.js && node --check scripts/ensure-cloudflared.js && node --check scripts/agentmemory-health.js && node --check scripts/x-publisher.js && node --check scripts/x-article.js && node --check scripts/note-draft.js && python -m py_compile scripts/x-post-uia.py && python -m py_compile scripts/note-draft-uia.py && node --check public/main.js && node --check public/bridge-client-utils.js && node --check public/sw.js",
     "docs:dev": "vitepress dev docs",
     "docs:build": "node scripts/build-docs.js",
     "docs:preview": "vitepress preview docs"

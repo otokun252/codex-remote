@@ -10,7 +10,9 @@ const menuButton = document.querySelector("#menuButton");
 const previewButton = document.querySelector("#previewButton");
 const closePanelButton = document.querySelector("#closePanelButton");
 const addButton = document.querySelector("#addButton");
-const imageButton = document.querySelector("#imageButton");
+const attachButton = document.querySelector("#attachButton");
+const composerUtilityTray = document.querySelector("#composerUtilityTray");
+const workflowQuickButton = document.querySelector("#workflowQuickButton");
 const accessButton = document.querySelector("#accessButton");
 const stopButton = document.querySelector("#stopButton");
 const thinkingButton = document.querySelector("#thinkingButton");
@@ -43,15 +45,14 @@ const approveButton = document.querySelector("#approve");
 const declineButton = document.querySelector("#decline");
 let workflowButton = document.querySelector("#workflowButton");
 const defaultSendButtonLabel = sendButton ? sendButton.innerHTML : "";
+const clientUtils = window.CodexRemoteClientUtils;
 
-const params = new URLSearchParams(location.search);
-const token = params.get("token") || localStorage.getItem("codexPhoneToken") || "";
-const deviceId =
-  localStorage.getItem("codexPhoneDeviceId") ||
-  (crypto.randomUUID ? crypto.randomUUID() : `device-${Date.now()}-${Math.random().toString(16).slice(2)}`);
-localStorage.setItem("codexPhoneDeviceId", deviceId);
-let selectedThread = params.get("thread") || localStorage.getItem("codexPhoneLastThread") || "";
-if (token) localStorage.setItem("codexPhoneToken", token);
+const initialConnection = clientUtils.resolveInitialConnection(location.search, localStorage, crypto);
+let token = initialConnection.token;
+const deviceId = initialConnection.deviceId;
+let deviceName = initialConnection.deviceName;
+let connectionProfile = initialConnection.profile;
+let selectedThread = initialConnection.lastThread;
 let appInfo = { productMode: false };
 
 const themeOptions = [
@@ -59,9 +60,10 @@ const themeOptions = [
   { id: "cyberpunk", name: "サイバーパンク", detail: "暗め / ネオンアクセント" },
   { id: "botanical", name: "ボタニカル", detail: "葉色 / 紙のような柔らかさ" },
 ];
-let selectedTheme = localStorage.getItem("codexPhoneTheme") || "simple";
+let selectedTheme = connectionProfile.theme || "simple";
 
 let ws = null;
+let wsGeneration = 0;
 let pendingApproval = null;
 let assistantEntry = null;
 let statusGroup = null;
@@ -71,13 +73,15 @@ let lastHistorySignature = "";
 let lastThreadListError = "";
 let lastThreadRefreshError = "";
 let selectedThreadRefreshActive = false;
-let selectedModel = localStorage.getItem("codexPhoneModel") || "";
-let selectedModelLabel = localStorage.getItem("codexPhoneModelLabel") || "5.5";
-let selectedReasoning = localStorage.getItem("codexPhoneReasoning") || "中";
+let selectedModel = connectionProfile.preferredModel || "";
+let selectedModelLabel = connectionProfile.preferredModelLabel || "5.5";
+let selectedReasoning = connectionProfile.reasoning || "中";
+let selectedSpeed = connectionProfile.speed || "通常";
 let settingsRenderSeq = 0;
 let artifactItems = [];
 let activeArtifactPath = "";
 let activeFolderPath = "";
+let activeBrowseThreadId = "";
 let accessMode = {
   label: "フルアクセス",
   approvalPolicy: "never",
@@ -87,9 +91,14 @@ let pendingFiles = [];
 let reconnectTimer = null;
 let reconnectAttempts = 0;
 let intentionalClose = false;
-let followUpButton = null;
-let interruptButton = null;
+let reconnectReason = "";
+let connectInFlight = false;
 let pendingFollowUpPreview = "";
+let connectionInfoCache = null;
+let lastSendSignature = "";
+let lastSendAt = 0;
+let currentLiveThreadId = "";
+const activeThreadIds = new Set();
 
 const runStateText = {
   connecting: "接続中",
@@ -115,7 +124,7 @@ function applyTheme(themeId) {
   const nextTheme = themeOptions.some((theme) => theme.id === themeId) ? themeId : "simple";
   selectedTheme = nextTheme;
   document.documentElement.dataset.theme = nextTheme;
-  localStorage.setItem("codexPhoneTheme", nextTheme);
+  connectionProfile = clientUtils.writeConnectionProfile(localStorage, { theme: nextTheme });
 }
 
 applyTheme(selectedTheme);
@@ -135,12 +144,40 @@ function ensureWorkflowButton() {
 
 const accessModes = [
   { label: "フルアクセス", approvalPolicy: "never", sandboxMode: "danger-full-access" },
-  { label: "確認モード", approvalPolicy: "on-request", sandboxMode: "workspace-write" },
+  { label: "承認あり", approvalPolicy: "on-request", sandboxMode: "workspace-write" },
   { label: "読み取り専用", approvalPolicy: "on-request", sandboxMode: "read-only" },
 ];
+const legacyAccessModeMap = new Map([
+  ["確認モード", "承認あり"],
+]);
+const normalizedSavedAccessMode = legacyAccessModeMap.get(connectionProfile.accessMode) || connectionProfile.accessMode;
+if (normalizedSavedAccessMode !== connectionProfile.accessMode) {
+  persistConnectionProfile({ accessMode: normalizedSavedAccessMode });
+}
+const savedAccessMode = accessModes.find((mode) => mode.label === normalizedSavedAccessMode);
+if (savedAccessMode) accessMode = savedAccessMode;
+
+function humanApprovalPolicy(value) {
+  if (value === "never") return "不要";
+  if (value === "on-request") return "必要時のみ";
+  return value || "";
+}
+
+function humanSandboxMode(value) {
+  if (value === "danger-full-access") return "フルアクセス";
+  if (value === "workspace-write") return "ワークスペース書き込み";
+  if (value === "read-only") return "読み取り専用";
+  return value || "";
+}
 
 function updateModelButton() {
-  modelButton.textContent = `${selectedModelLabel} / ${selectedReasoning}`;
+  const compactMode = window.matchMedia("(max-width: 380px)").matches;
+  const narrowMode = window.matchMedia("(max-width: 520px)").matches;
+  modelButton.textContent = compactMode
+    ? selectedModelLabel
+    : narrowMode
+      ? `${selectedModelLabel} / ${selectedReasoning}`
+      : `${selectedModelLabel} / ${selectedReasoning} / ${selectedSpeed}`;
   for (const row of modelMenu.querySelectorAll("[data-reasoning]")) {
     const active = row.dataset.reasoning === selectedReasoning;
     row.classList.toggle("active", active);
@@ -157,6 +194,19 @@ function updateModelButton() {
   for (const row of modelMenu.querySelectorAll("[data-model-choice]")) {
     row.classList.toggle("active", row.dataset.modelChoice === selectedModel);
   }
+  for (const row of modelMenu.querySelectorAll("[data-speed]")) {
+    const active = row.dataset.speed === selectedSpeed;
+    row.classList.toggle("active", active);
+    let mark = row.querySelector(".checkmark");
+    if (active && !mark) {
+      mark = document.createElement("span");
+      mark.className = "checkmark";
+      mark.textContent = "✓";
+      row.appendChild(mark);
+    } else if (!active && mark) {
+      mark.remove();
+    }
+  }
 }
 
 function closeModelMenu() {
@@ -170,18 +220,28 @@ function toggleModelMenu() {
 
 function selectReasoning(value) {
   selectedReasoning = value;
-  localStorage.setItem("codexPhoneReasoning", value);
+  connectionProfile = clientUtils.writeConnectionProfile(localStorage, { reasoning: value });
   updateModelButton();
   closeModelMenu();
   addStatus(`思考量を ${value} に設定しました。`);
+}
+
+function selectSpeed(value) {
+  selectedSpeed = value;
+  connectionProfile = clientUtils.writeConnectionProfile(localStorage, { speed: value });
+  updateModelButton();
+  closeModelMenu();
+  addStatus(`速度を ${value} に設定しました。`);
 }
 
 function selectModel(model) {
   selectedModel = model;
   selectedModelLabel = model.replace(/^gpt-/, "").toUpperCase().replace(/^GPT-/, "");
   if (selectedModelLabel.startsWith("5.")) selectedModelLabel = selectedModelLabel;
-  localStorage.setItem("codexPhoneModel", selectedModel);
-  localStorage.setItem("codexPhoneModelLabel", selectedModelLabel);
+  connectionProfile = clientUtils.writeConnectionProfile(localStorage, {
+    preferredModel: selectedModel,
+    preferredModelLabel: selectedModelLabel,
+  });
   updateModelButton();
   closeModelMenu();
   addStatus(`モデルを ${model.toUpperCase()} に設定しました。次の送信から反映します。`);
@@ -193,10 +253,20 @@ function titleForThread(thread) {
   return firstLine.length > 54 ? `${firstLine.slice(0, 54)}...` : firstLine;
 }
 
-function projectForThread(thread) {
-  const cwd = String(thread.cwd || "").replace(/\/+$/, "");
-  if (!cwd) return "No project";
-  return cwd.split("/").filter(Boolean).pop() || cwd;
+function normalizedProjectPath(thread) {
+  return String(thread.cwd || "").replace(/[\\/]+$/, "");
+}
+
+function projectGroupMeta(thread, existingKeys = new Set()) {
+  const cwd = normalizedProjectPath(thread);
+  if (!cwd) return { key: "No project", label: "No project" };
+  const parts = cwd.split(/[\\/]/).filter(Boolean);
+  if (!parts.length) return { key: cwd, label: cwd };
+  const base = parts.at(-1);
+  const parent = parts.at(-2);
+  const short = parent ? `${parent}/${base}` : base;
+  const label = existingKeys.has(base) ? short : base;
+  return { key: cwd, label };
 }
 
 function formatRelativeTime(timestamp) {
@@ -490,26 +560,49 @@ function setEntryText(body, kind, text) {
   else body.textContent = body.markdownSource;
 }
 
+function isLogNearBottom(threshold = 72) {
+  if (!log) return true;
+  return log.scrollHeight - log.scrollTop - log.clientHeight <= threshold;
+}
+
+function scrollLogToBottom() {
+  if (!log) return;
+  log.scrollTop = log.scrollHeight;
+}
+
+function maybeScrollLogToBottom(shouldFollow) {
+  if (shouldFollow) scrollLogToBottom();
+}
+
 function urlWithToken(url) {
   const target = new URL(url, location.href);
   target.searchParams.set("token", token);
   return target.pathname + target.search;
 }
 
-function renderImageGallery(images = []) {
-  if (!images.length) return null;
+function renderAttachmentGallery(items = []) {
+  if (!items.length) return null;
   const gallery = document.createElement("div");
   gallery.className = "image-gallery";
-  for (const image of images) {
+  for (const item of items) {
     const figure = document.createElement("figure");
     figure.className = "image-preview";
-    const img = document.createElement("img");
-    img.src = image.dataUrl || urlWithToken(image.url);
-    img.alt = image.name || "添付画像";
-    img.loading = "lazy";
+    const source = item.dataUrl || urlWithToken(item.url);
+    const isVideo = item.type?.startsWith("video/");
+    const media = isVideo ? document.createElement("video") : document.createElement("img");
+    media.src = source;
+    if (!isVideo) media.loading = "lazy";
+    if (isVideo) {
+      media.controls = true;
+      media.preload = "metadata";
+      media.playsInline = true;
+      media.muted = true;
+    } else {
+      media.alt = item.name || "添付";
+    }
     const caption = document.createElement("figcaption");
-    caption.textContent = image.name || "image";
-    figure.append(img, caption);
+    caption.textContent = item.name || (isVideo ? "video" : "image");
+    figure.append(media, caption);
     gallery.appendChild(figure);
   }
   return gallery;
@@ -541,6 +634,7 @@ function updateStatusGroup(group) {
 }
 
 function addStatusGroupItem(text) {
+  const shouldFollow = isLogNearBottom();
   if (!statusGroup || statusGroup.items.length >= 12) {
     const el = document.createElement("article");
     el.className = "entry status status-group";
@@ -572,10 +666,11 @@ function addStatusGroupItem(text) {
   }
   statusGroup.items.push(text);
   updateStatusGroup(statusGroup);
-  log.scrollTop = log.scrollHeight;
+  maybeScrollLogToBottom(shouldFollow);
 }
 
 function addEntry(kind, text, images = []) {
+  const shouldFollow = isLogNearBottom();
   if (kind === "status") {
     addStatusGroupItem(text);
     return null;
@@ -592,7 +687,7 @@ function addEntry(kind, text, images = []) {
   const body = document.createElement("div");
   body.className = "entry-body";
   setEntryText(body, kind, text);
-  const gallery = kind === "user" ? renderImageGallery(images) : null;
+  const gallery = kind === "user" ? renderAttachmentGallery(images) : null;
   if (gallery) body.appendChild(gallery);
 
   const tools = document.createElement("div");
@@ -601,7 +696,7 @@ function addEntry(kind, text, images = []) {
 
   el.append(avatar, body, tools);
   log.appendChild(el);
-  log.scrollTop = log.scrollHeight;
+  maybeScrollLogToBottom(shouldFollow);
   return body;
 }
 
@@ -622,36 +717,21 @@ function updateStopButton() {
   updateComposerActions();
 }
 
-function ensureComposerActionButtons() {
-  if (followUpButton && interruptButton) return;
-  const right = document.querySelector(".composer-right");
-  if (!right || !sendButton) return;
-  if (!followUpButton) {
-    followUpButton = document.createElement("button");
-    followUpButton.type = "button";
-    followUpButton.className = "secondary-action-button tool-button";
-    followUpButton.id = "followUpButton";
-    followUpButton.textContent = "追記";
-    followUpButton.title = "続けて送る";
-    right.insertBefore(followUpButton, stopButton || modelButton || sendButton);
-  }
-  if (!interruptButton) {
-    interruptButton = document.createElement("button");
-    interruptButton.type = "button";
-    interruptButton.className = "secondary-action-button interrupt tool-button";
-    interruptButton.id = "interruptButton";
-    interruptButton.textContent = "割込";
-    interruptButton.title = "いまの処理を止めて送る";
-    right.insertBefore(interruptButton, stopButton || modelButton || sendButton);
-  }
-  if (followUpButton && !followUpButton.dataset.bound) {
-    followUpButton.addEventListener("click", () => sendComposerMessage("followup"));
-    followUpButton.dataset.bound = "1";
-  }
-  if (interruptButton && !interruptButton.dataset.bound) {
-    interruptButton.addEventListener("click", () => sendComposerMessage("interrupt"));
-    interruptButton.dataset.bound = "1";
-  }
+function setComposerUtilityTray(open) {
+  if (!composerUtilityTray || !addButton) return;
+  composerUtilityTray.classList.toggle("is-open", open);
+  composerUtilityTray.setAttribute("aria-hidden", open ? "false" : "true");
+  addButton.classList.toggle("active", open);
+  addButton.setAttribute("aria-expanded", open ? "true" : "false");
+  addButton.textContent = open ? "×" : "+";
+  addButton.title = open ? "補助操作を閉じる" : "補助操作";
+  addButton.setAttribute("aria-label", open ? "補助操作を閉じる" : "補助操作");
+  if (open) closeModelMenu();
+}
+
+function toggleComposerUtilityTray() {
+  if (!composerUtilityTray) return;
+  setComposerUtilityTray(!composerUtilityTray.classList.contains("is-open"));
 }
 
 function previewText(value, limit = 72) {
@@ -660,10 +740,53 @@ function previewText(value, limit = 72) {
   return compact.length > limit ? `${compact.slice(0, limit)}...` : compact;
 }
 
+function persistConnectionProfile(patch = {}) {
+  connectionProfile = clientUtils.writeConnectionProfile(localStorage, {
+    ...patch,
+    deviceId,
+    deviceName,
+    lastThread: selectedThread || "",
+    preferredModel: selectedModel,
+    preferredModelLabel: selectedModelLabel,
+    reasoning: selectedReasoning,
+    speed: selectedSpeed,
+    accessMode: accessMode.label,
+    theme: selectedTheme,
+    lastPublicUrl: location.origin,
+  });
+  return connectionProfile;
+}
+
+function saveComposerDraft() {
+  clientUtils.saveDraft(localStorage, {
+    text: promptInput.value || "",
+    threadId: selectedThread || "",
+    at: new Date().toISOString(),
+  });
+}
+
+function clearComposerDraft() {
+  clientUtils.clearDraft(localStorage);
+}
+
+function restoreComposerDraft() {
+  const draft = clientUtils.readDraft(localStorage);
+  if (!draft?.text) return;
+  promptInput.value = draft.text;
+  addStatus("未送信の下書きを復元しました。");
+}
+
 function sendComposerMessage(type = "prompt") {
   const text = promptInput.value.trim();
   if ((!text && !pendingFiles.length) || !ws || ws.readyState !== WebSocket.OPEN) return false;
   const displayText = text || "Check the attached image.";
+  const signature = `${type}::${displayText}::${pendingFiles.map((file) => file.name).join("|")}`;
+  if (Date.now() - lastSendAt < 1200 && signature === lastSendSignature) {
+    addStatus("同じ内容の連続送信を抑制しました。");
+    return false;
+  }
+  lastSendAt = Date.now();
+  lastSendSignature = signature;
   ws.send(
     JSON.stringify({
       type,
@@ -674,12 +797,16 @@ function sendComposerMessage(type = "prompt") {
         model: selectedModel || undefined,
         approvalPolicy: accessMode.approvalPolicy,
         sandboxMode: accessMode.sandboxMode,
+        reasoning: selectedReasoning,
+        speed: selectedSpeed,
       },
     }),
   );
   promptInput.value = "";
   pendingFiles = [];
+  clearComposerDraft();
   renderAttachments();
+  setComposerUtilityTray(false);
   if (type === "interrupt") {
     pendingFollowUpPreview = previewText(displayText);
     addStatus(`割り込み送信: ${pendingFollowUpPreview}`);
@@ -689,32 +816,28 @@ function sendComposerMessage(type = "prompt") {
   }
   liveTurnActive = true;
   updateStopButton();
+  persistConnectionProfile({ lastConnectedAt: new Date().toISOString() });
   return true;
 }
 
 function updateComposerActions() {
-  ensureComposerActionButtons();
   const connected = Boolean(ws && ws.readyState === WebSocket.OPEN);
-  const hasDraft = Boolean(promptInput?.value.trim() || pendingFiles.length);
   if (sendButton) {
     sendButton.disabled = !connected;
-    sendButton.title = liveTurnActive ? "追記を送る" : "送信";
+    sendButton.title = liveTurnActive ? "追加指示を送る" : "送信";
+    sendButton.setAttribute("aria-label", liveTurnActive ? "追加指示を送る" : "送信");
     if (sendButton.innerHTML !== defaultSendButtonLabel) sendButton.innerHTML = defaultSendButtonLabel;
-  }
-  if (followUpButton) {
-    followUpButton.hidden = !liveTurnActive;
-    followUpButton.disabled = !connected || !hasDraft;
-  }
-  if (interruptButton) {
-    interruptButton.hidden = !liveTurnActive;
-    interruptButton.disabled = !connected || !hasDraft;
   }
 }
 
 function renderHistory(history) {
+  const shouldFollow = isLogNearBottom();
+  const preservedScrollTop = log.scrollTop;
   log.replaceChildren();
   statusGroup = null;
   for (const entry of history || []) addEntry(entry.type, entry.text, entry.attachments || []);
+  if (shouldFollow) scrollLogToBottom();
+  else log.scrollTop = preservedScrollTop;
 }
 
 function historySignature(history = []) {
@@ -746,16 +869,23 @@ function renderThreadList() {
   threadList.appendChild(newProject);
 
   const groups = new Map();
+  const labelCounts = new Map();
   for (const thread of threadCache) {
-    const project = projectForThread(thread);
+    const project = projectGroupMeta(thread);
     const title = titleForThread(thread);
-    const matches = !query || project.toLowerCase().includes(query) || title.toLowerCase().includes(query);
+    const matches = !query || project.label.toLowerCase().includes(query) || project.key.toLowerCase().includes(query) || title.toLowerCase().includes(query);
     if (!matches) continue;
-    if (!groups.has(project)) groups.set(project, []);
-    groups.get(project).push(thread);
+    const nextCount = (labelCounts.get(project.label) || 0) + 1;
+    labelCounts.set(project.label, nextCount);
+    if (!groups.has(project.key)) groups.set(project.key, { label: project.label, threads: [] });
+    groups.get(project.key).threads.push(thread);
   }
 
-  for (const [project, threads] of groups) {
+  for (const groupInfo of groups.values()) {
+    const label = labelCounts.get(groupInfo.label) > 1 && groupInfo.threads[0]
+      ? shortPath(normalizedProjectPath(groupInfo.threads[0])) || groupInfo.label
+      : groupInfo.label;
+    const threads = groupInfo.threads;
     const group = document.createElement("section");
     group.className = "project-group";
 
@@ -764,23 +894,41 @@ function renderThreadList() {
     const folder = document.createElement("span");
     folder.className = "project-folder";
     const name = document.createElement("span");
-    name.textContent = project;
+    name.textContent = label;
+    heading.title = normalizedProjectPath(threads[0]) || label;
     heading.append(folder, name);
     group.appendChild(heading);
 
     const visibleThreads = threads.slice(0, 6);
     for (const thread of visibleThreads) {
+      const isRunningThread =
+        Boolean(thread.active) ||
+        Boolean(thread.live) ||
+        activeThreadIds.has(thread.id);
       const item = document.createElement("button");
       item.type = "button";
-      item.className = thread.id === selectedThread ? "thread-item active" : "thread-item";
+      item.className = [
+        "thread-item",
+        thread.id === selectedThread ? "active" : "",
+        isRunningThread ? "running" : "",
+      ].filter(Boolean).join(" ");
       item.title = titleForThread(thread);
       const title = document.createElement("span");
       title.className = "thread-title";
       title.textContent = titleForThread(thread);
+      const metaWrap = document.createElement("span");
+      metaWrap.className = "thread-meta";
+      if (isRunningThread) {
+        const badge = document.createElement("span");
+        badge.className = "thread-badge";
+        badge.textContent = "作業中";
+        metaWrap.appendChild(badge);
+      }
       const time = document.createElement("span");
       time.className = "thread-time";
       time.textContent = formatRelativeTime(thread.updatedAt || thread.createdAt);
-      item.append(title, time);
+      metaWrap.appendChild(time);
+      item.append(title, metaWrap);
       item.addEventListener("click", () => selectThread(thread.id));
       group.appendChild(item);
     }
@@ -840,10 +988,42 @@ async function apiPost(path, body) {
 async function registerDevice() {
   if (!token) return null;
   try {
-    return await apiPost("/api/device/register", { deviceId });
+    const result = await apiPost("/api/device/register", {
+      deviceId,
+      deviceName,
+      userAgent: navigator.userAgent,
+      lastPublicUrl: location.origin,
+      preferredModel: selectedModel,
+      reasoning: selectedReasoning,
+      speed: selectedSpeed,
+      accessMode: accessMode.label,
+      theme: selectedTheme,
+      lastThread: selectedThread || "",
+    });
+    if (result?.device?.deviceName) deviceName = result.device.deviceName;
+    persistConnectionProfile({ token, lastConnectedAt: new Date().toISOString() });
+    clientUtils.stripTokenFromLocation(selectedThread || "");
+    return result;
   } catch (error) {
     addEntry("error", `端末登録に失敗しました: ${error.message}`);
     return null;
+  }
+}
+
+function markThreadActive(threadId) {
+  if (!threadId) return;
+  activeThreadIds.add(threadId);
+}
+
+function markThreadInactive(threadId) {
+  if (!threadId) return;
+  activeThreadIds.delete(threadId);
+}
+
+function syncActiveThreadsFromCache() {
+  activeThreadIds.clear();
+  for (const thread of threadCache) {
+    if (thread?.id && (thread.active || thread.live)) activeThreadIds.add(thread.id);
   }
 }
 
@@ -865,13 +1045,16 @@ async function restoreSessionState() {
   if (!token) return;
   try {
     const result = await apiGet(`/api/session/current?device=${encodeURIComponent(deviceId)}`);
+    connectionInfoCache = result.connection || connectionInfoCache;
+    if (result.device?.deviceName) deviceName = result.device.deviceName;
     if (!selectedThread && result.session?.threadId) {
       selectedThread = result.session.threadId;
-      localStorage.setItem("codexPhoneLastThread", selectedThread);
+      persistConnectionProfile({ lastThread: selectedThread });
       updateUrlThread();
     }
     if (result.session?.history?.length) renderHistoryIfChanged(result.session.history);
-    if (result.session?.status === "running" || result.live?.active) setRunState("running", "PC側で処理中");
+    if (result.live?.active && result.live?.threadId) markThreadActive(result.live.threadId);
+    if (result.session?.status === "running" || result.live?.active) setRunState("running", "PC側では作業継続中です。再同期しています");
     else if (result.session?.status === "error") setRunState("error", "前回エラー");
     else if (result.session) setRunState("ready", "前回セッションを復元");
     if (result.artifacts?.length) {
@@ -882,6 +1065,8 @@ async function restoreSessionState() {
       }));
       renderArtifactIndex(artifactItems);
     }
+    renderMeta(result.live);
+    restoreComposerDraft();
   } catch (error) {
     addStatus(`前回状態を復元できませんでした: ${error.message}`);
   }
@@ -892,6 +1077,7 @@ async function loadThreads({ background = false } = {}) {
   try {
     const result = await apiGet("/api/threads");
     threadCache = result.data || [];
+    syncActiveThreadsFromCache();
     renderThreadList();
     lastThreadListError = "";
   } catch (error) {
@@ -933,9 +1119,22 @@ async function loadArtifacts() {
   }
 }
 
+function renderMeta(liveState = null) {
+  const parts = [];
+  if (deviceName) parts.push(`この端末: ${deviceName}`);
+  if (liveState?.clients || connectionInfoCache?.clients) parts.push(`${liveState?.clients || connectionInfoCache?.clients}端末接続中`);
+  if (selectedThread) parts.push(`thread復元済み`);
+  if (connectionProfile.lastConnectedAt) {
+    const time = new Date(connectionProfile.lastConnectedAt);
+    if (!Number.isNaN(time.getTime())) parts.push(`最終同期: ${time.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}`);
+  }
+  meta.textContent = parts.filter(Boolean).join("  •  ") || "接続中";
+}
+
 function updateUrlThread() {
-  if (selectedThread) localStorage.setItem("codexPhoneLastThread", selectedThread);
+  persistConnectionProfile({ lastThread: selectedThread || "" });
   const next = new URL(location.href);
+  next.searchParams.delete("token");
   if (!appInfo.productMode) {
     if (selectedThread) next.searchParams.set("thread", selectedThread);
     else next.searchParams.delete("thread");
@@ -952,12 +1151,13 @@ function syncReadyThread(threadId) {
   const selected = threadCache.find((thread) => thread.id === selectedThread);
   threadTitle.textContent = selected ? titleForThread(selected) : selectedThread;
   renderThreadList();
+  renderMeta();
 }
 
 function selectThread(threadId) {
   selectedThread = threadId;
-  if (selectedThread) localStorage.setItem("codexPhoneLastThread", selectedThread);
-  else localStorage.removeItem("codexPhoneLastThread");
+  activeBrowseThreadId = threadId || "";
+  activeFolderPath = "";
   updateUrlThread();
   renderThreadList();
   document.body.classList.remove("show-sidebar");
@@ -993,6 +1193,16 @@ function addPanelRow(text, detail, onClick) {
   if (onClick) row.addEventListener("click", onClick);
   artifactList.appendChild(row);
   return row;
+}
+
+function addPanelActionButton(label, onClick, options = {}) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = options.secondary ? "secondary-action-button" : "artifact-preview-close";
+  button.textContent = label;
+  button.addEventListener("click", onClick);
+  artifactList.appendChild(button);
+  return button;
 }
 
 function initialsFor(value) {
@@ -1048,6 +1258,10 @@ function authenticatedResourceUrl(url) {
   if (!url) return url;
   const separator = url.includes("?") ? "&" : "?";
   return `${url}${separator}${authQuery()}`;
+}
+
+function currentBrowseThreadId() {
+  return activeBrowseThreadId || selectedThread || "";
 }
 
 async function capturePcScreen() {
@@ -1168,6 +1382,7 @@ function formatFileSize(size) {
 
 async function showFolder(path = activeFolderPath || "") {
   showRightPanel();
+  activeBrowseThreadId = selectedThread || activeBrowseThreadId;
   artifactTitle.textContent = path ? `フォルダ: ${path}` : "フォルダ";
   artifactList.classList.add("artifact-browser-list");
   artifactList.replaceChildren();
@@ -1175,7 +1390,8 @@ async function showFolder(path = activeFolderPath || "") {
   artifactPreview.textContent = "";
   addPanelRow("読み込み中...", path || "作業フォルダ");
   try {
-    const result = await apiGet(`/api/files?path=${encodeURIComponent(path || "")}`);
+    const threadQuery = currentBrowseThreadId() ? `&thread=${encodeURIComponent(currentBrowseThreadId())}` : "";
+    const result = await apiGet(`/api/files?path=${encodeURIComponent(path || "")}${threadQuery}`);
     activeFolderPath = result.path || "";
     artifactTitle.textContent = activeFolderPath ? `フォルダ: ${activeFolderPath}` : "フォルダ";
     artifactList.replaceChildren();
@@ -1625,8 +1841,9 @@ async function showSettings() {
     const config = result.config?.config || {};
     addPanelRow("認証", result.auth?.authMethod || "unknown");
     addPanelRow("既定モデル", config.model || selectedModel || "unknown");
-    addPanelRow("承認", accessMode.approvalPolicy);
-    addPanelRow("サンドボックス", accessMode.sandboxMode);
+    addPanelRow("権限", accessMode.label);
+    addPanelRow("承認", humanApprovalPolicy(accessMode.approvalPolicy));
+    addPanelRow("サンドボックス", humanSandboxMode(accessMode.sandboxMode));
     addPanelRow("作業ディレクトリ", config.cwd || "");
     if (result.errors?.length) addPanelRow("補足エラー", result.errors.join(" / "));
   } catch (error) {
@@ -1750,8 +1967,70 @@ async function showStatus() {
   }
 }
 
+async function reloadSavedConnection() {
+  const restored = clientUtils.readConnectionProfile(localStorage);
+  token = restored.token || token;
+  deviceName = restored.deviceName || deviceName;
+  selectedThread = restored.lastThread || selectedThread;
+  connectionProfile = restored;
+  updateUrlThread();
+  renderMeta();
+}
+
+function resetSavedToken() {
+  intentionalClose = true;
+  if (ws && ws.readyState < WebSocket.CLOSING) ws.close();
+  clientUtils.resetSavedConnection(localStorage);
+  token = "";
+  selectedThread = "";
+  connectionProfile = clientUtils.readConnectionProfile(localStorage);
+  renderMeta();
+  setRunState("disconnected", "tokenを削除しました。PC側のQRを読み直してください");
+  addStatus("tokenを削除しました。次回はPC側のQRを読み直してください。");
+}
+
+async function showConnectionCenter() {
+  clearPanel("接続情報");
+  addPanelRow("読み込み中...");
+  try {
+    connectionInfoCache = await apiGet("/api/connection-center");
+    artifactList.replaceChildren();
+    addPanelRow("この端末", `${deviceName} / ${clientUtils.shortDeviceId(deviceId)}`);
+    addPanelRow("接続状態", ws && ws.readyState === WebSocket.OPEN ? "接続中" : "未接続");
+    addPanelRow("接続モード", connectionInfoCache.modeLabel || "不明");
+    addPanelRow("接続先URL", connectionInfoCache.accessUrl || connectionInfoCache.publicOrigin || location.origin);
+    addPanelRow("token保存", token ? "保存済み" : "未保存");
+    if (connectionProfile.lastConnectedAt) addPanelRow("最終接続", connectionProfile.lastConnectedAt);
+    if (selectedThread) addPanelRow("復元thread", selectedThread);
+    addPanelRow("端末数", `${connectionInfoCache.clients || 0}端末`);
+    for (const device of connectionInfoCache.devices || []) {
+      const detail = `${device.connected ? "接続中" : "未接続"}${device.lastConnectedAt ? ` / ${device.lastConnectedAt}` : ""}`;
+      addPanelRow(device.deviceName || "Browser", detail);
+    }
+    addPanelActionButton("再接続", () => connect({ automatic: false, reason: "manual reconnect" }), { secondary: true });
+    addPanelActionButton("URL/token再読込", () => {
+      reloadSavedConnection();
+      addStatus("保存済みの接続情報を再読込しました。");
+    });
+    addPanelActionButton("thread復元", async () => {
+      await restoreSessionState();
+      addStatus("前回threadを再確認しました。");
+    });
+    addPanelActionButton("tokenを削除してやり直す", resetSavedToken);
+    addPanelRow(
+      "注意",
+      connectionInfoCache.mode === "fixed"
+        ? "固定URLなら同じ入口から戻りやすくなります。"
+        : "Quick TunnelはURLが変わることがあります。変わったら新しいQRを読み直してください。",
+    );
+  } catch (error) {
+    showToolError("接続情報", error);
+  }
+}
+
 async function showArtifact(path) {
   showRightPanel();
+  activeBrowseThreadId = selectedThread || activeBrowseThreadId;
   artifactTitle.textContent = "アーティファクト";
   artifactList.classList.add("artifact-browser-list");
   activeArtifactPath = path;
@@ -1765,7 +2044,8 @@ async function showArtifact(path) {
     <p>読み込み中...</p>
   `;
   try {
-    const result = await apiGet(`/api/file?path=${encodeURIComponent(path)}`);
+    const threadQuery = currentBrowseThreadId() ? `&thread=${encodeURIComponent(currentBrowseThreadId())}` : "";
+    const result = await apiGet(`/api/file?path=${encodeURIComponent(path)}${threadQuery}`);
     setArtifactPreview(result);
     artifactPreview.classList.remove("hidden");
   } catch (error) {
@@ -1794,7 +2074,7 @@ function setArtifactPreview(result) {
   `;
   if (isImage) {
     artifactPreview.innerHTML = header;
-    const gallery = renderImageGallery([{ name: result.path, url: authenticatedResourceUrl(result.imageUrl) }]);
+    const gallery = renderAttachmentGallery([{ name: result.path, url: authenticatedResourceUrl(result.imageUrl) }]);
     artifactPreview.appendChild(gallery);
     return;
   }
@@ -1810,9 +2090,14 @@ function renderAttachments() {
     const chip = document.createElement("button");
     chip.type = "button";
     chip.className = "attachment-chip";
-    const thumb = document.createElement("img");
+    const thumb = file.type?.startsWith("video/") ? document.createElement("video") : document.createElement("img");
     thumb.src = file.dataUrl;
     thumb.alt = "";
+    if (thumb.tagName === "VIDEO") {
+      thumb.preload = "metadata";
+      thumb.muted = true;
+      thumb.playsInline = true;
+    }
     const label = document.createElement("span");
     label.textContent = file.name;
     const close = document.createElement("span");
@@ -1836,22 +2121,25 @@ function readFileAsDataUrl(file) {
 }
 
 function scheduleReconnect(reason = "") {
-  if (!token || reconnectTimer) return;
-  const delay = Math.min(30_000, 1200 * 2 ** Math.min(reconnectAttempts, 5));
+  if (!clientUtils.shouldAutoReconnect({ token, intentionalClose, online: navigator.onLine }) || reconnectTimer) return;
+  const delay = clientUtils.computeReconnectDelay(reconnectAttempts);
   reconnectAttempts += 1;
-  setRunState("disconnected", `切断。${Math.round(delay / 1000)}秒後に再接続`);
+  reconnectReason = reason || reconnectReason;
+  setRunState("disconnected", reconnectReason || `再接続中: ${Math.round(delay / 1000)}秒後`);
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
-    connect({ automatic: true });
+    connect({ automatic: true, reason: reconnectReason || "retry" });
   }, delay);
   if (reason) addStatus(`再接続を待機中: ${reason}`);
 }
 
-function connect({ automatic = false } = {}) {
+function connect({ automatic = false, reason = "" } = {}) {
   if (!token) {
-    addEntry("error", "URLに token がありません。Mac側に表示されたURLをそのまま開いてください。");
+    setRunState("disconnected", "tokenがありません。PC側のQRを読み直してください");
+    addEntry("error", "URLに token がありません。PC側Bridge のQRまたは接続URLを開き直してください。");
     return;
   }
+  if (connectInFlight) return;
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
@@ -1861,9 +2149,10 @@ function connect({ automatic = false } = {}) {
     ws.__manualClose = true;
     ws.close();
   }
+  connectInFlight = true;
   intentionalClose = false;
   liveTurnActive = false;
-  setRunState("connecting");
+  setRunState("connecting", reason ? `再接続中: ${reason}` : "接続中");
   lastHistorySignature = "";
   if (!automatic && !selectedThread) renderHistory([]);
   const selected = threadCache.find((thread) => thread.id === selectedThread);
@@ -1871,31 +2160,66 @@ function connect({ automatic = false } = {}) {
 
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   const threadParam = selectedThread ? `&thread=${encodeURIComponent(selectedThread)}` : "";
+  const query = [
+    `token=${encodeURIComponent(token)}`,
+    `device=${encodeURIComponent(deviceId)}`,
+    `deviceName=${encodeURIComponent(deviceName)}`,
+    `origin=${encodeURIComponent(location.origin)}`,
+    `model=${encodeURIComponent(selectedModel || "")}`,
+    `reasoning=${encodeURIComponent(selectedReasoning || "")}`,
+    `speed=${encodeURIComponent(selectedSpeed || "")}`,
+    `accessMode=${encodeURIComponent(accessMode.label || "")}`,
+    `theme=${encodeURIComponent(selectedTheme || "")}`,
+    threadParam ? threadParam.slice(1) : "",
+  ]
+    .filter(Boolean)
+    .join("&");
+  wsGeneration += 1;
+  const currentGeneration = wsGeneration;
   ws = new WebSocket(
-    `${proto}//${location.host}/bridge?token=${encodeURIComponent(token)}&device=${encodeURIComponent(deviceId)}${threadParam}`,
+    `${proto}//${location.host}/bridge?${query}`,
   );
   const socket = ws;
   connectButton.disabled = true;
   meta.textContent = "接続中";
 
   ws.addEventListener("open", () => {
+    if (currentGeneration !== wsGeneration) return;
+    connectInFlight = false;
     updateStopButton();
     setRunState("connecting", "Codex に接続中");
-    addEntry("status", "Macの共有ブリッジへ接続しました。");
+    addEntry("status", "PC側Bridge へ接続しました。");
+    persistConnectionProfile({ lastConnectedAt: new Date().toISOString() });
   });
 
   ws.addEventListener("message", (event) => {
+    if (currentGeneration !== wsGeneration) return;
     const msg = JSON.parse(event.data);
     if (msg.type === "ready") {
       reconnectAttempts = 0;
+      reconnectReason = "";
+      currentLiveThreadId = msg.threadId || currentLiveThreadId;
+      if (msg.live?.active && msg.threadId) markThreadActive(msg.threadId);
       setReady(true);
       syncReadyThread(msg.threadId);
-      if (msg.threadId) localStorage.setItem("codexPhoneLastThread", msg.threadId);
+      if (msg.threadId) persistConnectionProfile({ lastThread: msg.threadId, lastConnectedAt: new Date().toISOString() });
       renderHistoryIfChanged(msg.history || []);
-      meta.textContent = `${msg.model}  •  ${msg.clients}端末  •  ${msg.workdir}`;
+      renderMeta({ clients: msg.clients });
+      connectionInfoCache = {
+        ...(connectionInfoCache || {}),
+        clients: msg.clients,
+        devices: msg.devices || [],
+        mode: msg.connectionMode || connectionInfoCache?.mode,
+        publicOrigin: msg.currentAccessUrl || connectionInfoCache?.publicOrigin,
+      };
       setRunState("ready");
       updateStopButton();
       addEntry("status", `共有Codex thread ready: ${msg.threadId}`);
+      return;
+    }
+    if (msg.type === "presence") {
+      connectionInfoCache = { ...(connectionInfoCache || {}), clients: msg.clients, devices: msg.devices || [] };
+      renderMeta({ clients: msg.clients });
       return;
     }
     if (msg.type === "artifact" && msg.artifact) {
@@ -1913,19 +2237,28 @@ function connect({ automatic = false } = {}) {
       }
       return;
     }
+    if (msg.type === "queued") {
+      setRunState("running", `再接続後も待機中: ${msg.queued || 1}件`);
+      addStatus(`作業に追加しました: ${previewText(msg.text)}`);
+      return;
+    }
     if (msg.type === "user") {
       liveTurnActive = true;
+      currentLiveThreadId = msg.threadId || selectedThread || currentLiveThreadId;
+      markThreadActive(currentLiveThreadId);
       assistantEntry = null;
       setRunState("running");
       updateStopButton();
+      renderThreadList();
       addEntry("user", msg.text, msg.attachments || []);
       return;
     }
     if (msg.type === "assistantDelta") {
+      const shouldFollow = isLogNearBottom();
       setRunState("streaming");
       if (!assistantEntry) assistantEntry = addEntry("assistant", "");
       setEntryText(assistantEntry, "assistant", `${assistantEntry.markdownSource || ""}${msg.text}`);
-      log.scrollTop = log.scrollHeight;
+      maybeScrollLogToBottom(shouldFollow);
       return;
     }
     if (msg.type === "approval") {
@@ -1936,29 +2269,46 @@ function connect({ automatic = false } = {}) {
       approval.classList.remove("hidden");
       return;
     }
+    if (msg.type === "approvalResolved") {
+      pendingApproval = null;
+      approval.classList.add("hidden");
+      updateStopButton();
+      setRunState("running", msg.decision === "accept" ? "別端末で承認済み" : "別端末で拒否済み");
+      addStatus(msg.decision === "accept" ? "別端末で承認済みです。" : "別端末で拒否済みです。");
+      return;
+    }
     if (msg.type === "turn" && msg.status === "started") {
       liveTurnActive = true;
+      currentLiveThreadId = msg.threadId || selectedThread || currentLiveThreadId;
+      markThreadActive(currentLiveThreadId);
       updateStopButton();
+      renderThreadList();
       return;
     }
     if (msg.type === "turn" && msg.status === "stopped") {
       liveTurnActive = false;
+      currentLiveThreadId = msg.threadId || currentLiveThreadId;
+      markThreadInactive(currentLiveThreadId);
       pendingApproval = null;
       approval.classList.add("hidden");
       assistantEntry = null;
       setRunState("done", "停止しました");
       updateStopButton();
+      renderThreadList();
       refreshSelectedThread();
       loadArtifacts();
       return;
     }
     if (msg.type === "turn" && msg.status === "completed") {
       liveTurnActive = false;
+      currentLiveThreadId = msg.threadId || currentLiveThreadId;
+      markThreadInactive(currentLiveThreadId);
       pendingApproval = null;
       updateStopButton();
       lastHistorySignature = "";
       assistantEntry = null;
       setRunState("done", "完了しました");
+      renderThreadList();
       loadThreads();
       refreshSelectedThread();
       loadArtifacts();
@@ -1978,15 +2328,30 @@ function connect({ automatic = false } = {}) {
   });
 
   ws.addEventListener("close", () => {
-    if (ws !== socket) return;
+    if (ws !== socket || currentGeneration !== wsGeneration) return;
+    connectInFlight = false;
     setReady(false);
-    liveTurnActive = false;
     pendingApproval = null;
     updateStopButton();
     connectButton.disabled = false;
-    meta.textContent = "切断";
-    setRunState("disconnected", "切断。PC側の作業は継続します");
-    if (!intentionalClose && !socket.__manualClose) scheduleReconnect("WebSocket closed");
+    renderMeta();
+    renderThreadList();
+    if (!navigator.onLine) {
+      setRunState("disconnected", "通信がオフラインです。復帰後に再接続します");
+      return;
+    }
+    const guidance = appInfo.stablePublicUrl
+      ? "PC側Bridge が起動していないか、固定URL側が切断されています。"
+      : "PC側Bridge が起動していないか、Quick Tunnel URL が変わった可能性があります。";
+    setRunState("disconnected", guidance);
+    if (clientUtils.shouldAutoReconnect({ token, intentionalClose, manualClose: socket.__manualClose, online: navigator.onLine })) {
+      scheduleReconnect("PC側では作業継続中です。接続を戻しています");
+    }
+  });
+
+  ws.addEventListener("error", () => {
+    if (currentGeneration !== wsGeneration) return;
+    connectInFlight = false;
   });
 }
 
@@ -2032,7 +2397,6 @@ automationsButton.addEventListener("click", showAutomations);
 settingsButton.addEventListener("click", showSettings);
 mobileThreadsButton.addEventListener("click", () => document.body.classList.toggle("show-sidebar"));
 sidebarScrim.addEventListener("click", () => document.body.classList.remove("show-sidebar"));
-connectButton.addEventListener("click", connect);
 menuButton.addEventListener("click", () => {
   const desktopPanelVisible =
     window.matchMedia("(min-width: 1101px)").matches && !document.body.classList.contains("hide-artifacts");
@@ -2049,17 +2413,22 @@ closePanelButton.addEventListener("click", closeRightPanel);
 artifactPreview.addEventListener("click", (event) => {
   if (event.target.closest("[data-preview-close]")) hideArtifactPreview();
 });
-addButton.addEventListener("click", () => fileInput.click());
-imageButton.addEventListener("click", () => {
-  promptInput.value = `${promptInput.value}${promptInput.value ? "\n" : ""}画像を生成して。完成した画像は docs/assets か tmp/generated-images に保存して、スマホのアーティファクト/プレビューで確認できるようにして。`;
-  promptInput.focus();
+addButton.addEventListener("click", toggleComposerUtilityTray);
+attachButton?.addEventListener("click", () => {
+  setComposerUtilityTray(false);
+  fileInput.click();
+});
+workflowQuickButton?.addEventListener("click", () => {
+  setComposerUtilityTray(false);
+  showWorkflows();
+  showRightPanel();
 });
 fileInput.addEventListener("change", async () => {
-  const files = Array.from(fileInput.files || []).filter((file) => file.type.startsWith("image/"));
+  const files = Array.from(fileInput.files || []).filter((file) => file.type.startsWith("image/") || file.type.startsWith("video/"));
   try {
     pendingFiles = pendingFiles.concat(await Promise.all(files.map(readFileAsDataUrl)));
     renderAttachments();
-    if (files.length) addStatus(`${files.length}件の画像を添付しました。送信時にCodexへ渡します。`);
+    if (files.length) addStatus(`${files.length}件の添付を追加しました。送信時にCodexへ渡します。`);
   } catch (error) {
     addEntry("error", `添付に失敗しました: ${error.message}`);
   } finally {
@@ -2067,9 +2436,10 @@ fileInput.addEventListener("change", async () => {
     updateComposerActions();
   }
 });
-promptInput.addEventListener("input", updateComposerActions);
-followUpButton?.addEventListener("click", () => sendComposerMessage("followup"));
-interruptButton?.addEventListener("click", () => sendComposerMessage("interrupt"));
+promptInput.addEventListener("input", () => {
+  updateComposerActions();
+  saveComposerDraft();
+});
 stopButton?.addEventListener("click", () => {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   ws.send(JSON.stringify({ type: "stop", token }));
@@ -2082,7 +2452,8 @@ stopButton?.addEventListener("click", () => {
 accessButton.addEventListener("click", () => {
   const index = accessModes.findIndex((candidate) => candidate.label === accessMode.label);
   accessMode = accessModes[(index + 1) % accessModes.length];
-  accessButton.textContent = accessMode.label;
+  accessButton.textContent = `${accessMode.label}⌄`;
+  persistConnectionProfile({ accessMode: accessMode.label });
   addStatus(`権限を ${accessMode.label} に切り替えました。次の送信から反映します。`);
 });
 thinkingButton?.addEventListener("click", toggleModelMenu);
@@ -2092,6 +2463,11 @@ modelMenu.addEventListener("click", (event) => {
   const reasoningRow = event.target.closest("[data-reasoning]");
   if (reasoningRow) {
     selectReasoning(reasoningRow.dataset.reasoning);
+    return;
+  }
+  const speedRow = event.target.closest("[data-speed]");
+  if (speedRow) {
+    selectSpeed(speedRow.dataset.speed);
     return;
   }
   const modelRow = event.target.closest("[data-model-choice]");
@@ -2105,11 +2481,16 @@ modelMenu.addEventListener("click", (event) => {
   }
 });
 document.addEventListener("click", (event) => {
+  if (composerUtilityTray && composerUtilityTray.classList.contains("is-open")) {
+    if (!composer.contains(event.target) || (!composerUtilityTray.contains(event.target) && !addButton.contains(event.target))) {
+      setComposerUtilityTray(false);
+    }
+  }
   if (modelMenu.classList.contains("hidden")) return;
   if (modelMenu.contains(event.target) || modelButton.contains(event.target) || thinkingButton?.contains(event.target)) return;
   closeModelMenu();
 });
-statusButton.addEventListener("click", showStatus);
+statusButton.addEventListener("click", showConnectionCenter);
 const folderButton = document.createElement("button");
 folderButton.type = "button";
 folderButton.className = "terminal-row";
@@ -2117,17 +2498,24 @@ folderButton.textContent = "フォルダ";
 folderButton.addEventListener("click", () => showFolder(""));
 terminalList?.appendChild(folderButton);
 previewButton.addEventListener("click", () => showPreviewTools());
+connectButton.addEventListener("click", () => showConnectionCenter());
 webSearchButton.addEventListener("click", () => {
   promptInput.value = `${promptInput.value}${promptInput.value ? "\n" : ""}Web調査を使って確認してください。`;
   promptInput.focus();
+  saveComposerDraft();
 });
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "visible") return;
-  if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) connect({ automatic: true });
+  if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+    connect({ automatic: true, reason: "PWA復帰" });
+  }
   loadThreads({ background: true }).catch(() => {});
+  restoreSessionState().catch(() => {});
   refreshSelectedThread();
   loadArtifacts();
 });
+window.addEventListener("online", () => connect({ automatic: true, reason: "オンライン復帰" }));
+window.addEventListener("offline", () => setRunState("disconnected", "オフラインです。復帰後に再接続します"));
 for (const button of artifactButtons) {
   button.addEventListener("click", () => {
     for (const candidate of artifactButtons) candidate.classList.toggle("active", candidate === button);
@@ -2137,6 +2525,9 @@ for (const button of artifactButtons) {
 
 setReady(false);
 updateModelButton();
+accessButton.textContent = `${accessMode.label}⌄`;
+setComposerUtilityTray(false);
+renderMeta();
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js").catch(() => {});
 }
@@ -2145,6 +2536,12 @@ registerDevice()
   .then(loadArtifacts)
   .then(() => loadThreads({ background: true }))
   .catch(() => {})
-  .finally(connect);
+  .finally(() => connect({ automatic: true }));
 setInterval(() => loadThreads({ background: true }), 10_000);
 setInterval(refreshSelectedThread, 3_000);
+setInterval(() => {
+  if (token) apiGet("/api/connection-center").then((result) => {
+    connectionInfoCache = result;
+    renderMeta();
+  }).catch(() => {});
+}, 15000);

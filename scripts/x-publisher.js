@@ -556,7 +556,9 @@ async function publishWithUiaFallback(args, text) {
     "--timeout-ms",
     String(Math.max(delayMs + 15000, 30000)),
     "--window-title-regex",
-    ".* / X - Google Chrome",
+    ".*X.*Google Chrome",
+    "--text-snippet",
+    text.slice(0, 48),
   ];
   if (args["dry-run"]) {
     helperArgs.push("--dry-run");
@@ -566,6 +568,41 @@ async function publishWithUiaFallback(args, text) {
   process.stdout.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
   console.log(`UIA fallback completed in Chrome profile "${profile}".`);
+}
+
+async function publishWithFallbacks(args, text, primaryError) {
+  const failures = [];
+  if (primaryError) failures.push(`CDP path failed: ${primaryError.message}`);
+
+  if (args["uia-fallback"] && !args["quote-url"]) {
+    try {
+      console.log(primaryError ? `CDP path failed: ${primaryError.message}` : "Trying Chrome UIA publish.");
+      console.log("Falling back to Chrome UIA button click.");
+      await publishWithUiaFallback(args, text);
+      const screenshotPath = await captureWorkflowScreenshot("x-post");
+      if (screenshotPath) console.log(`SCREENSHOT:${relativeToRoot(screenshotPath)}`);
+      return;
+    } catch (uiaError) {
+      failures.push(`UIA fallback failed: ${uiaError.message}`);
+    }
+  }
+
+  if (args["hotkey-fallback"] && !args["quote-url"]) {
+    try {
+      if (failures.length) {
+        for (const failure of failures) console.log(failure);
+      }
+      console.log("Falling back to Chrome hotkey publish.");
+      await publishWithHotkeyFallback(args, text);
+      const screenshotPath = await captureWorkflowScreenshot("x-post");
+      if (screenshotPath) console.log(`SCREENSHOT:${relativeToRoot(screenshotPath)}`);
+      return;
+    } catch (hotkeyError) {
+      failures.push(`Hotkey fallback failed: ${hotkeyError.message}`);
+    }
+  }
+
+  throw new Error(failures.join("\n"));
 }
 
 async function postFlow(args) {
@@ -607,20 +644,8 @@ async function postFlow(args) {
     const screenshotPath = await captureWorkflowScreenshot("x-post");
     if (screenshotPath) console.log(`SCREENSHOT:${relativeToRoot(screenshotPath)}`);
   } catch (error) {
-    if (args["uia-fallback"] && !quoteUrl) {
-      console.log(`CDP path failed: ${error.message}`);
-      console.log("Falling back to Chrome UIA button click.");
-      await publishWithUiaFallback(args, text);
-      const screenshotPath = await captureWorkflowScreenshot("x-post");
-      if (screenshotPath) console.log(`SCREENSHOT:${relativeToRoot(screenshotPath)}`);
-      return;
-    }
-    if (args["hotkey-fallback"] && !quoteUrl) {
-      console.log(`CDP path failed: ${error.message}`);
-      console.log("Falling back to Chrome hotkey publish.");
-      await publishWithHotkeyFallback(args, text);
-      const screenshotPath = await captureWorkflowScreenshot("x-post");
-      if (screenshotPath) console.log(`SCREENSHOT:${relativeToRoot(screenshotPath)}`);
+    if ((args["uia-fallback"] || args["hotkey-fallback"]) && !quoteUrl) {
+      await publishWithFallbacks(args, text, error);
       return;
     }
     throw error;

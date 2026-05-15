@@ -23,7 +23,7 @@ def choose_window(desktop, title_regex):
         for window in reversed(windows):
             try:
                 for ctrl in window.descendants(control_type="Button"):
-                    if ctrl.window_text() == "Post":
+                    if ctrl.window_text() in {"Post", "ポストする", "投稿する"}:
                         return window
             except Exception:
                 continue
@@ -51,7 +51,7 @@ def has_text(window, snippet):
 
 
 def find_post_button(window):
-    labels = ["Post"]
+    labels = ["Post", "ポストする", "投稿する"]
     for label in labels:
         try:
             if hasattr(window, "child_window"):

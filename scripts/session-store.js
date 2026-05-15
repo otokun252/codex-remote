@@ -3,7 +3,7 @@ const fs = require("fs");
 const path = require("path");
 
 const defaultState = {
-  version: 1,
+  version: 2,
   devices: {},
   sessions: {},
   artifacts: [],
@@ -92,10 +92,24 @@ class SessionStore {
     const existing = this.state.devices[id] || {};
     const next = {
       id,
+      deviceName: existing.deviceName || "",
+      userAgent: existing.userAgent || "",
       createdAt: existing.createdAt || now(),
+      firstSeenAt: existing.firstSeenAt || existing.createdAt || now(),
       updatedAt: now(),
       lastSeenAt: now(),
+      lastConnectedAt: existing.lastConnectedAt || "",
+      lastDisconnectedAt: existing.lastDisconnectedAt || "",
       lastSessionId: existing.lastSessionId || "",
+      lastThreadId: existing.lastThreadId || existing.lastSessionId || "",
+      lastPublicUrl: existing.lastPublicUrl || "",
+      preferredModel: existing.preferredModel || "",
+      reasoning: existing.reasoning || "",
+      speed: existing.speed || "",
+      accessMode: existing.accessMode || "",
+      theme: existing.theme || "",
+      connected: Boolean(existing.connected),
+      connectionCount: Number(existing.connectionCount || 0),
       agentId: existing.agentId || "local-codex",
     };
     this.state.devices[id] = next;
@@ -108,8 +122,41 @@ class SessionStore {
     const next = {
       ...device,
       ...patch,
+      connectionCount:
+        patch.connectionCount !== undefined ? Number(patch.connectionCount || 0) : Number(device.connectionCount || 0),
       updatedAt: now(),
       lastSeenAt: now(),
+    };
+    this.state.devices[device.id] = next;
+    this.save();
+    return clone(next);
+  }
+
+  recordDeviceConnection(deviceId, patch = {}) {
+    const device = this.ensureDevice(deviceId);
+    const next = {
+      ...device,
+      ...patch,
+      connected: patch.connected !== undefined ? Boolean(patch.connected) : true,
+      updatedAt: now(),
+      lastSeenAt: now(),
+      lastConnectedAt: now(),
+      connectionCount: Number(device.connectionCount || 0) + 1,
+    };
+    this.state.devices[device.id] = next;
+    this.save();
+    return clone(next);
+  }
+
+  recordDeviceDisconnect(deviceId, patch = {}) {
+    const device = this.ensureDevice(deviceId);
+    const next = {
+      ...device,
+      ...patch,
+      connected: false,
+      updatedAt: now(),
+      lastSeenAt: now(),
+      lastDisconnectedAt: now(),
     };
     this.state.devices[device.id] = next;
     this.save();
@@ -182,6 +229,16 @@ class SessionStore {
       session: session ? clone(session) : null,
       artifacts: clone(this.state.artifacts.slice(0, 40)),
     };
+  }
+
+  listDevices() {
+    return Object.values(this.state.devices || {})
+      .sort((left, right) => {
+        const leftTime = new Date(left.lastConnectedAt || left.lastSeenAt || left.createdAt || 0).getTime();
+        const rightTime = new Date(right.lastConnectedAt || right.lastSeenAt || right.createdAt || 0).getTime();
+        return rightTime - leftTime;
+      })
+      .map((device) => clone(device));
   }
 }
 

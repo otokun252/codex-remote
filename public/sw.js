@@ -1,5 +1,14 @@
-const CACHE_NAME = "codex-remote-shell-v1";
-const SHELL_ASSETS = ["/", "/index.html", "/style.css", "/main.js", "/site.webmanifest", "/icon-192.png", "/icon-512.png"];
+const CACHE_NAME = "codex-remote-shell-v2";
+const SHELL_ASSETS = [
+  "/",
+  "/index.html",
+  "/style.css",
+  "/main.js",
+  "/bridge-client-utils.js",
+  "/site.webmanifest",
+  "/icon-192.png",
+  "/icon-512.png",
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_ASSETS)));

@@ -322,6 +322,26 @@ button.project-heading.active {
   white-space: nowrap;
 }
 
+.thread-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.thread-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  border-radius: 999px;
+  padding: 0 8px;
+  background: color-mix(in srgb, var(--state-running) 10%, var(--card));
+  color: var(--state-running);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .thread-time {
   color: var(--muted);
   font-weight: 400;
@@ -585,7 +605,8 @@ body.hide-artifacts .artifact-panel {
   background: var(--soft);
 }
 
-.image-preview img {
+.image-preview img,
+.image-preview video {
   display: block;
   width: 100%;
   max-height: 210px;
@@ -848,7 +869,8 @@ body.hide-artifacts .artifact-panel {
   overflow: hidden;
 }
 
-.attachment-chip img {
+.attachment-chip img,
+.attachment-chip video {
   width: 30px;
   height: 30px;
   border-radius: 50%;
@@ -881,54 +903,89 @@ textarea::placeholder {
   color: color-mix(in srgb, var(--muted) 78%, transparent);
 }
 
-.composer-footer {
+.composer-utility-tray {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  max-height: 0;
+  padding: 0 12px;
+  opacity: 0;
+  overflow: hidden;
+  transform: translateY(6px);
+  pointer-events: none;
+  transition:
+    max-height 180ms ease,
+    padding 180ms ease,
+    opacity 160ms ease,
+    transform 180ms ease;
+}
+
+.composer-utility-tray.is-open {
+  max-height: 120px;
+  padding: 0 12px 10px;
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.composer-footer {
+  display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
-  padding: 6px 12px 12px;
+  padding: 4px 12px 12px;
 }
 
 .composer-left,
 .composer-right {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
-  flex-wrap: wrap;
 }
 
-.composer-right {
-  justify-content: flex-end;
+.tool-button {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0 12px;
+  background: var(--card);
+  color: var(--nav-text);
+  white-space: nowrap;
 }
 
-.tool-button,
+.tool-button:hover,
+.tool-button.active {
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--line));
+  background: var(--soft);
+}
+
+.tray-button {
+  min-width: 0;
+}
+
+.utility-toggle {
+  width: 38px;
+  padding: 0;
+  font-size: 22px;
+  line-height: 1;
+}
+
 .ghost-button,
 .access-button,
 .model-button,
 .stop-button,
 .thinking-button,
 .voice-button {
-  min-height: 38px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 0 12px;
-  background: var(--soft);
-  color: var(--nav-text);
-  white-space: nowrap;
-}
-
-.tool-button.icon-only {
-  display: grid;
-  place-items: center;
-  width: 38px;
-  padding: 0;
+  min-height: 34px;
 }
 
 .stop-button {
+  width: 34px;
+  padding: 0;
+  border-radius: 999px;
   color: var(--error);
-  background: color-mix(in srgb, var(--error) 8%, var(--soft));
-  border-color: color-mix(in srgb, var(--error) 22%, var(--line));
+  background: color-mix(in srgb, var(--error) 10%, transparent);
 }
 
 .stop-button:disabled {
@@ -943,12 +1000,14 @@ textarea::placeholder {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 4px;
   color: var(--nav-text);
   white-space: nowrap;
-  max-width: 132px;
+  max-width: 154px;
   overflow: hidden;
   text-overflow: ellipsis;
+  border-color: var(--line);
+  background: var(--card);
 }
 
 .model-button::after {
@@ -962,12 +1021,16 @@ textarea::placeholder {
   opacity: 0.78;
 }
 
+.thinking-button,
 .voice-button {
   position: relative;
   display: grid;
   place-items: center;
-  width: 38px;
+  width: 34px;
   padding: 0;
+  border-color: var(--line);
+  background: var(--card);
+  color: var(--muted);
 }
 
 .thinking-button::before {
@@ -1073,8 +1136,8 @@ textarea::placeholder {
 .send-button {
   display: grid;
   place-items: center;
-  width: 44px;
-  height: 44px;
+  width: 38px;
+  height: 38px;
   border: 0;
   border-radius: 50%;
   background: var(--button);
@@ -1934,34 +1997,32 @@ textarea::placeholder {
   }
 
   .composer-footer {
-    grid-template-columns: 1fr;
     gap: 8px;
     padding: 0 9px 8px;
+  }
+
+  .composer-utility-tray {
+    gap: 6px;
+    padding: 0 10px 8px;
   }
 
   .composer-left,
   .composer-right {
     gap: 7px;
-    width: 100%;
   }
 
-  .composer-right {
-    justify-content: space-between;
-  }
-
-  .tool-button,
   .ghost-button,
   .access-button,
   .model-button,
   .thinking-button,
   .voice-button {
-    min-height: 34px;
+    min-height: 30px;
     font-size: 14px;
   }
 
   .thinking-button,
   .voice-button {
-    width: 34px;
+    width: 30px;
   }
 
   .thinking-button::before {
@@ -1991,8 +2052,8 @@ textarea::placeholder {
   }
 
   .send-button {
-    width: 40px;
-    height: 40px;
+    width: 34px;
+    height: 34px;
     font-size: 20px;
   }
 
@@ -2072,47 +2133,34 @@ textarea::placeholder {
   }
 
   .composer {
-    min-height: 112px;
+    min-height: 78px;
     border-radius: 16px;
   }
 
+  .composer-utility-tray {
+    gap: 6px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .composer-footer {
-    grid-template-columns: 1fr;
     gap: 6px;
     padding-bottom: 7px;
+    align-items: flex-end;
   }
 
   .composer-left,
   .composer-right {
     gap: 5px;
-    width: 100%;
-    flex-wrap: nowrap;
   }
 
-  .composer-left {
-    overflow-x: auto;
-    padding-bottom: 2px;
-  }
-
-  .composer-right {
-    justify-content: flex-end;
-    flex-wrap: wrap;
-  }
-
-  .tool-button,
-  .secondary-action-button {
-    min-height: 36px;
+  .tool-button {
+    min-height: 32px;
     padding: 0 10px;
-    border-radius: 12px;
-  }
-
-  .access-button {
-    max-width: none;
+    font-size: 14px;
   }
 
   .model-button {
-    max-width: none;
-    justify-content: center;
+    max-width: 92px;
   }
 
   .model-menu {
@@ -2150,13 +2198,19 @@ textarea::placeholder {
     height: 30px;
   }
 
-  .tool-button,
-  .access-button,
-  .model-button,
-  .thinking-button,
-  .voice-button,
-  .secondary-action-button {
+  .composer-left,
+  .composer-right {
+    gap: 5px;
+  }
+
+  .tool-button {
     font-size: 13px;
+  }
+
+  .model-button {
+    max-width: 62px;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .thread-time {

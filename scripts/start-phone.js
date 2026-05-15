@@ -12,7 +12,7 @@ const qrcode = require("qrcode-terminal");
 const { bridgeKeyForRequest, shouldDisposeIdleBridge, shouldPromoteBridgeKey } = require("./bridge-state");
 const { startQuickTunnel } = require("./cloudflared-tunnel");
 const { isHistorySyncEnabled, runHistorySync } = require("./history-sync");
-const { notifyBridgeUrls } = require("./phone-notify");
+const { notifyBridgeUrls, notifyPhoneEvent } = require("./phone-notify");
 const { SessionStore } = require("./session-store");
 
 const root = path.resolve(__dirname, "..");
@@ -48,6 +48,8 @@ const workdir = process.env.CODEX_WORKDIR || root;
 const model = process.env.CODEX_MODEL || "gpt-5.4";
 const codexLaunchMode = process.env.CODEX_LAUNCH_MODE || "app-server";
 const historySyncEnabled = isHistorySyncEnabled(process.env);
+const notifyOnComplete =
+  /^(1|true|yes)$/i.test(String(process.env.PHONE_NOTIFY_ON_COMPLETE || ""));
 const publicTunnelEnabled =
   process.argv.includes("--tunnel") ||
   /^(1|true|yes)$/i.test(String(process.env.PHONE_PUBLIC_TUNNEL || ""));
@@ -68,6 +70,9 @@ const bridges = new Map();
 const historyLimit = 80;
 let managedCodexChild = null;
 let activeWorkflowName = "";
+let currentAccessUrl = "";
+let currentPublicUrl = "";
+let currentConnectionMode = stablePublicUrl ? "fixed" : publicTunnelEnabled ? "quick-tunnel" : "local-only";
 const imageExtensions = new Map([
   [".png", "image/png"],
   [".jpg", "image/jpeg"],
@@ -86,6 +91,29 @@ const staticMimeTypes = new Map([
   [".webmanifest", "application/manifest+json"],
 ]);
 
+function currentAccessUrls() {
+  return [currentAccessUrl, currentPublicUrl, stablePublicUrl].filter(Boolean);
+}
+
+function notifyTurnCompleted(threadId) {
+  if (!notifyOnComplete) return;
+  const summary = [
+    "Codex の処理が完了しました。",
+    threadId ? `thread: ${threadId}` : "",
+    activeWorkflowName ? `workflow: ${activeWorkflowName}` : "",
+  ].filter(Boolean).join("\n");
+  notifyPhoneEvent({
+    urls: currentAccessUrls(),
+    title: "Codex の処理が完了しました。",
+    body: summary.includes("\n") ? summary.split("\n").slice(1).join("\n") : "",
+    footer: "スマホで結果を確認できます。",
+    pushTitle: "Codex Remote 完了",
+    pushUrlTitle: "Codex Remote を開く",
+  }).catch((error) => {
+    console.warn(`[phone-notify] completion notification failed: ${error.message}`);
+  });
+}
+
 function getToken() {
   if (process.env.PHONE_TOKEN) return process.env.PHONE_TOKEN;
   if (fs.existsSync(tokenPath)) return fs.readFileSync(tokenPath, "utf8").trim();
@@ -96,10 +124,11 @@ function getToken() {
 
 function waitForReady() {
   const url = `http://127.0.0.1:${codexPort}/readyz`;
+  const timeoutMs = Number(process.env.PHONE_CODEX_READY_TIMEOUT_MS || 30000);
   return new Promise((resolve, reject) => {
     const started = Date.now();
     const retry = () => {
-      if (Date.now() - started > 10_000) reject(new Error("Codex app-server did not become ready"));
+      if (Date.now() - started > timeoutMs) reject(new Error("Codex app-server did not become ready"));
       else setTimeout(tick, 250);
     };
     const tick = () => {
@@ -338,26 +367,96 @@ function accessUrlCandidates({ publicUrl = "", phoneToken }) {
   return [...new Set(candidates.filter(Boolean))];
 }
 
-function printQrAccessCard(accessUrl, phoneToken) {
+function shortDeviceId(deviceId = "") {
+  const clean = String(deviceId || "").trim();
+  if (!clean) return "";
+  return clean.length <= 12 ? clean : `${clean.slice(0, 6)}...${clean.slice(-4)}`;
+}
+
+function connectionModeLabel() {
+  if (currentConnectionMode === "fixed") return "固定URL";
+  if (currentConnectionMode === "quick-tunnel") return "Quick Tunnel";
+  return "ローカル";
+}
+
+function activeDeviceIds() {
+  const ids = new Set();
+  for (const bridge of bridges.values()) {
+    if (!bridge.clientDeviceIds) continue;
+    for (const deviceId of bridge.clientDeviceIds.values()) {
+      if (deviceId) ids.add(deviceId);
+    }
+  }
+  return ids;
+}
+
+function deviceSnapshotList() {
+  const activeIds = activeDeviceIds();
+  return store.listDevices().map((device) => ({
+    ...device,
+    connected: activeIds.has(device.id) || Boolean(device.connected),
+  }));
+}
+
+function refreshConnectionArtifacts(phoneToken) {
+  if (!currentAccessUrl) return;
+  printQrAccessCard(currentAccessUrl, phoneToken, { notify: false });
+}
+
+function printQrAccessCard(accessUrl, phoneToken, options = {}) {
+  const notify = options.notify !== false;
   const connectionTextPath = path.join(root, "connection.txt");
   const connectionHtmlPath = path.join(root, "connection.html");
   const qrPngPath = path.join(root, "connection-qr-latest.png");
+  currentAccessUrl = accessUrl;
+  currentPublicUrl = (() => {
+    try {
+      return new URL(accessUrl).origin;
+    } catch {
+      return accessUrl;
+    }
+  })();
+  currentConnectionMode = stablePublicUrl ? "fixed" : publicTunnelEnabled ? "quick-tunnel" : "local-only";
+  const devices = deviceSnapshotList();
+  const deviceLines = devices.length
+    ? devices.map((device) => {
+        const state = device.connected ? "connected" : "offline";
+        const name = device.deviceName || "Browser";
+        const lastAt = device.lastConnectedAt || device.lastSeenAt || device.createdAt || "";
+        return `- ${name} (${shortDeviceId(device.id)}) ${state}${lastAt ? ` last=${lastAt}` : ""}`;
+      })
+    : ["- no devices yet"];
   fs.writeFileSync(
     connectionTextPath,
     [
       `URL: ${accessUrl}`,
       `TOKEN: ${phoneToken}`,
+      `MODE: ${connectionModeLabel()}`,
       "",
       "Keep the start window open while using this URL.",
       stablePublicUrl
         ? "URL is configured from PHONE_PUBLIC_URL and should stay stable across updates."
         : "This is an outside-access tunnel URL. It may change when the bridge restarts.",
+      "Do not share this URL or token with other people.",
+      "",
+      "Connected devices:",
+      ...deviceLines,
     ].join("\n"),
     "utf8",
   );
   QRCode.toFile(qrPngPath, accessUrl, { margin: 2, width: 640 }, () => {});
   QRCode.toString(accessUrl, { type: "svg", margin: 2, width: 320 }, (error, svg) => {
     const qrMarkup = error ? `<p>QR generation failed: ${escapeHtml(error.message)}</p>` : svg;
+    const deviceMarkup = devices.length
+      ? devices
+          .map((device) => {
+            const name = escapeHtml(device.deviceName || "Browser");
+            const state = device.connected ? "接続中" : "未接続";
+            const lastAt = escapeHtml(device.lastConnectedAt || device.lastSeenAt || device.createdAt || "");
+            return `<li><strong>${name}</strong> <code>${escapeHtml(shortDeviceId(device.id))}</code> · ${state}${lastAt ? ` · ${lastAt}` : ""}</li>`;
+          })
+          .join("")
+      : "<li>まだ接続端末はありません。</li>";
     fs.writeFileSync(
       connectionHtmlPath,
       [
@@ -374,15 +473,23 @@ function printQrAccessCard(accessUrl, phoneToken) {
         ".url-card{margin:16px 0;padding:14px;border:1px solid #e5e5e5;border-radius:10px;background:#fafafa}",
         ".label{display:inline-block;margin-bottom:6px;color:#666;font-size:13px;font-weight:700}",
         "code{background:#f1f1f3;padding:3px 6px;border-radius:6px}",
+        "ul{padding-left:20px}.note{color:#555;font-size:14px}",
         "</style>",
         "</head>",
         "<body><main>",
-        "<h1>Codex Remote Access</h1>",
-        "<p>Scan this QR code from your phone. This URL is for outside access.</p>",
+        "<h1>Codex Remote Connection Center</h1>",
+        "<p>スマホでQRを読み取って接続します。スマホは操作画面で、実行本体はWindows PC側で動きます。</p>",
         `<div class="qr">${qrMarkup}</div>`,
-        `<div class="url-card"><span class="label">Outside access URL</span><br><a href="${escapeHtml(accessUrl)}">${escapeHtml(accessUrl)}</a></div>`,
+        `<div class="url-card"><span class="label">外部アクセスURL</span><br><a href="${escapeHtml(accessUrl)}">${escapeHtml(accessUrl)}</a></div>`,
         `<p><strong>Token:</strong> <code>${escapeHtml(phoneToken)}</code></p>`,
-        "<p>Keep this URL and token private.</p>",
+        `<p><strong>接続モード:</strong> ${escapeHtml(connectionModeLabel())}</p>`,
+        stablePublicUrl
+          ? "<p class=\"note\">固定URLモードです。PWAを開き直すだけで戻りやすくなります。</p>"
+          : "<p class=\"note\">Quick Tunnelは再起動でURLが変わることがあります。URLが変わったら新しいQRを読み直してください。</p>",
+        "<p class=\"note\">このURLとtokenは他人に見せないでください。</p>",
+        "<h2>接続済み端末</h2>",
+        `<ul>${deviceMarkup}</ul>`,
+        "<p class=\"note\">README: <a href=\"README.ja.md\">README.ja.md</a> / <a href=\"README.md\">README.md</a></p>",
         "</main></body></html>",
       ].join("\n"),
       "utf8",
@@ -402,12 +509,14 @@ function printQrAccessCard(accessUrl, phoneToken) {
   console.log("=========================================");
   console.log("");
 
-  notifyBridgeUrls([accessUrl]).then((results) => {
-    for (const result of results) {
-      if (result.ok) console.log(`[notify] sent via ${result.type}`);
-      else console.warn(`[notify] ${result.type} failed: ${result.error}`);
-    }
-  });
+  if (notify) {
+    notifyBridgeUrls([accessUrl]).then((results) => {
+      for (const result of results) {
+        if (result.ok) console.log(`[notify] sent via ${result.type}`);
+        else console.warn(`[notify] ${result.type} failed: ${result.error}`);
+      }
+    });
+  }
 }
 function escapeHtml(value) {
   return String(value)
@@ -427,6 +536,29 @@ function sendJson(res, status, body) {
     "cache-control": "no-store",
   });
   res.end(JSON.stringify(body));
+}
+
+function connectionCenterPayload(phoneToken) {
+  let stableOrigin = "";
+  if (stablePublicUrl) {
+    try {
+      stableOrigin = new URL(stablePublicUrl).origin;
+    } catch {
+      stableOrigin = stablePublicUrl;
+    }
+  }
+  return {
+    mode: currentConnectionMode,
+    modeLabel: connectionModeLabel(),
+    publicOrigin: currentPublicUrl || stableOrigin,
+    accessUrl: currentAccessUrl || "",
+    token: phoneToken,
+    tokenPreview: `${phoneToken.slice(0, 4)}...${phoneToken.slice(-4)}`,
+    devices: deviceSnapshotList(),
+    clients: Array.from(bridges.values()).reduce((sum, bridge) => sum + bridge.clients.size, 0),
+    stablePublicUrl: stablePublicUrl || null,
+    quickTunnel: !stablePublicUrl && publicTunnelEnabled,
+  };
 }
 
 function requireToken(url, phoneToken, res) {
@@ -1034,6 +1166,10 @@ class SharedBridge {
     this.bridgeKey = bridgeKey;
     this.deviceId = deviceId;
     this.clients = new Set();
+    this.clientDeviceIds = new Map();
+    this.clientNames = new Map();
+    this.recentPrompts = new Map();
+    this.lastApprovalResolution = null;
     this.nextId = 1;
     this.pending = new Map();
     this.threadId = null;
@@ -1052,18 +1188,41 @@ class SharedBridge {
     this.bindUpstream(this.upstream);
   }
 
-  addClient(browser, deviceId = "") {
+  addClient(browser, deviceId = "", deviceInfo = {}) {
     if (deviceId) {
       this.deviceId = deviceId;
-      store.touchDevice(deviceId, { lastSessionId: this.threadId || this.requestedThreadId || "" });
+      this.clientDeviceIds.set(browser, deviceId);
+      this.clientNames.set(browser, deviceInfo.deviceName || "");
+      store.recordDeviceConnection(deviceId, {
+        deviceName: deviceInfo.deviceName || "",
+        userAgent: deviceInfo.userAgent || "",
+        lastSessionId: this.threadId || this.requestedThreadId || "",
+        lastThreadId: this.threadId || this.requestedThreadId || "",
+        lastPublicUrl: deviceInfo.lastPublicUrl || currentPublicUrl || "",
+        preferredModel: deviceInfo.preferredModel || "",
+        reasoning: deviceInfo.reasoning || "",
+        speed: deviceInfo.speed || "",
+        accessMode: deviceInfo.accessMode || "",
+        theme: deviceInfo.theme || "",
+      });
+      refreshConnectionArtifacts(deviceInfo.phoneToken || "");
     }
     this.clients.add(browser);
-    this.emitTo(browser, "status", { text: "共有Codexブリッジに参加しました。" });
+    this.emitTo(browser, "status", { text: "共有Codex Bridge に接続しました。" });
     if (this.ready) {
       this.emitTo(browser, "ready", this.readyPayload());
     }
+    this.broadcastPresence();
     browser.on("close", () => {
       this.clients.delete(browser);
+      const closedDeviceId = this.clientDeviceIds.get(browser) || "";
+      this.clientDeviceIds.delete(browser);
+      this.clientNames.delete(browser);
+      if (closedDeviceId && !activeDeviceIds().has(closedDeviceId)) {
+        store.recordDeviceDisconnect(closedDeviceId, { lastSessionId: this.threadId || this.requestedThreadId || "" });
+      }
+      refreshConnectionArtifacts(deviceInfo.phoneToken || "");
+      this.broadcastPresence();
       if (shouldDisposeIdleBridge({ clientCount: this.clients.size, ready: this.ready })) {
         this.upstream.close();
         bridges.delete(this.bridgeKey);
@@ -1078,9 +1237,34 @@ class SharedBridge {
       workdir,
       shared: true,
       clients: this.clients.size,
+      devices: this.connectedDevices(),
+      connectionMode: currentConnectionMode,
+      currentAccessUrl,
       history: this.history,
       session: this.threadId ? store.getSession(this.threadId) : null,
     };
+  }
+
+  connectedDevices() {
+    const uniqueIds = new Set(this.clientDeviceIds.values());
+    const devices = store.listDevices().filter((device) => uniqueIds.has(device.id));
+    return devices.map((device) => ({
+      id: device.id,
+      shortId: shortDeviceId(device.id),
+      name: device.deviceName || "Browser",
+      connected: true,
+      lastConnectedAt: device.lastConnectedAt || device.lastSeenAt || "",
+    }));
+  }
+
+  broadcastPresence() {
+    this.emit("presence", {
+      clients: this.clients.size,
+      devices: this.connectedDevices(),
+      threadId: this.threadId || this.requestedThreadId || "",
+      active: Boolean(this.activeTurnId || this.hasPendingTurnStart()),
+      queued: this.turnQueue.length,
+    });
   }
 
   emit(type, payload = {}) {
@@ -1176,8 +1360,14 @@ class SharedBridge {
           activeTurnId: "",
           queued: this.turnQueue.length,
         });
-        if (this.deviceId) store.touchDevice(this.deviceId, { lastSessionId: this.threadId });
+        if (this.deviceId) {
+          store.touchDevice(this.deviceId, {
+            lastSessionId: this.threadId,
+            lastThreadId: this.threadId,
+          });
+        }
         this.emit("ready", this.readyPayload());
+        this.broadcastPresence();
         this.startNextQueuedTurn();
         if (this.requestedThreadId) this.emit("status", { text: `既存threadを再開しました: ${this.threadId}` });
         return;
@@ -1192,6 +1382,7 @@ class SharedBridge {
           this.activeTurnId = msg.result.turn.id;
           this.persistStatus("running", { activeTurnId: this.activeTurnId });
           this.emit("turn", { status: "started", turnId: this.activeTurnId });
+          this.broadcastPresence();
         }
         return;
       }
@@ -1221,6 +1412,8 @@ class SharedBridge {
         registerDiscoveredArtifacts(root, this.threadId);
         this.persistStatus("completed", { activeTurnId: "", history: this.history });
         this.emit("turn", { status: "completed", turnId: msg.params.turnId });
+        this.broadcastPresence();
+        notifyTurnCompleted(this.threadId);
         this.syncHistory("turn completed");
         this.startNextQueuedTurn();
         return;
@@ -1228,6 +1421,7 @@ class SharedBridge {
 
       if (msg.method && msg.method.endsWith("/requestApproval")) {
         this.pendingApproval = msg;
+        this.lastApprovalResolution = null;
         this.emit("approval", { request: msg });
         return;
       }
@@ -1245,18 +1439,38 @@ class SharedBridge {
       if (this.upstream !== upstream) return;
       this.emit("error", { text: error.message });
     });
-    this.upstream.on("close", () => this.emit("status", { text: "Codex接続が閉じました" }));
+    this.upstream.on("close", () => this.emit("status", { text: "PC側Bridge との接続が閉じました" }));
   }
 
-  prompt(text, attachments = [], options = {}) {
+  shouldIgnoreDuplicatePrompt(deviceId, text, attachments = []) {
+    if (!deviceId) return false;
+    const files = (attachments || []).map((item) => item.name || item.type || "").join("|");
+    const signature = `${String(text || "").trim()}::${files}`;
+    const nowMs = Date.now();
+    const previous = this.recentPrompts.get(deviceId);
+    this.recentPrompts.set(deviceId, { signature, at: nowMs });
+    return Boolean(previous && previous.signature === signature && nowMs - previous.at < 1500);
+  }
+
+  prompt(text, attachments = [], options = {}, source = {}) {
     if (!this.threadId) {
       this.emit("error", { text: "Thread is not ready yet" });
+      return;
+    }
+    if (this.shouldIgnoreDuplicatePrompt(source.deviceId, text, attachments)) {
+      if (source.browser) {
+        this.emitTo(source.browser, "status", {
+          text: "同じ内容が短時間に送られたため二重送信を無視しました。",
+        });
+      }
       return;
     }
     if (this.activeTurnId || this.hasPendingTurnStart()) {
       this.turnQueue.push({ text, attachments, options });
       this.persistStatus("running", { queued: this.turnQueue.length });
+      this.emit("queued", { text, queued: this.turnQueue.length, deviceId: source.deviceId || "" });
       this.emit("status", { text: `Follow-up queued (${this.turnQueue.length} waiting)` });
+      this.broadcastPresence();
       return;
     }
     this.startPrompt(text, attachments, options);
@@ -1281,6 +1495,7 @@ class SharedBridge {
     if (!this.ready || this.activeTurnId || this.hasPendingTurnStart() || !this.turnQueue.length) return;
     const next = this.turnQueue.shift();
     this.emit("status", { text: `Starting queued follow-up (${this.turnQueue.length} remaining)` });
+    this.broadcastPresence();
     this.startPrompt(next.text, next.attachments, next.options);
   }
 
@@ -1334,7 +1549,15 @@ class SharedBridge {
   }
 
   approval(requestMsg, decision) {
-    if (!requestMsg || !requestMsg.id || !requestMsg.method) return;
+    if (this.lastApprovalResolution && requestMsg?.id === this.lastApprovalResolution.id) {
+      this.emit("approvalResolved", {
+        id: requestMsg.id,
+        decision: this.lastApprovalResolution.decision,
+        stale: true,
+      });
+      return;
+    }
+    if (!requestMsg || !requestMsg.id || !requestMsg.method || !this.pendingApproval || this.pendingApproval.id !== requestMsg.id) return;
     this.pendingApproval = null;
     const accept = decision === "accept";
     let result;
@@ -1346,7 +1569,13 @@ class SharedBridge {
       result = accept ? { decision: "accept" } : { decision: "decline" };
     }
     this.upstream.send(JSON.stringify({ id: requestMsg.id, result }));
+    this.lastApprovalResolution = { id: requestMsg.id, decision: accept ? "accept" : "decline" };
     this.emit("status", { text: accept ? "承認しました" : "拒否しました" });
+    this.emit("approvalResolved", {
+      id: requestMsg.id,
+      decision: accept ? "accept" : "decline",
+      stale: false,
+    });
   }
   stop({ preserveQueue = false, reason = "stop" } = {}) {
     const queuedCount = this.turnQueue.length;
@@ -1367,6 +1596,7 @@ class SharedBridge {
       });
       this.emit("turn", { status: "stopped" });
       this.persistStatus("stopped", { activeTurnId: "", queued: this.turnQueue.length });
+      this.broadcastPresence();
       return;
     }
     this.emit("status", {
@@ -1379,6 +1609,7 @@ class SharedBridge {
     });
     this.emit("turn", { status: "stopped" });
     this.persistStatus("stopped", { activeTurnId: "", queued: this.turnQueue.length });
+    this.broadcastPresence();
     this.pending.clear();
     this.activeTurnId = null;
     this.ready = false;
@@ -1408,9 +1639,9 @@ function getBridge(threadId, connectionId = crypto.randomUUID(), deviceId = "") 
   return bridges.get(key);
 }
 
-function bindBrowser(browser, phoneToken, threadId, deviceId = "") {
+function bindBrowser(browser, phoneToken, threadId, deviceId = "", deviceInfo = {}) {
   const bridge = getBridge(threadId, crypto.randomUUID(), deviceId);
-  bridge.addClient(browser, deviceId);
+  bridge.addClient(browser, deviceId, { ...deviceInfo, phoneToken });
 
   browser.on("message", (data) => {
     const msg = JSON.parse(data.toString());
@@ -1419,8 +1650,9 @@ function bindBrowser(browser, phoneToken, threadId, deviceId = "") {
       browser.close();
       return;
     }
-    if (msg.type === "prompt") bridge.prompt(msg.text, msg.attachments, msg.options);
-    if (msg.type === "followup") bridge.prompt(msg.text, msg.attachments, msg.options);
+    const source = { browser, deviceId };
+    if (msg.type === "prompt") bridge.prompt(msg.text, msg.attachments, msg.options, source);
+    if (msg.type === "followup") bridge.prompt(msg.text, msg.attachments, msg.options, source);
     if (msg.type === "interrupt") bridge.interrupt(msg.text, msg.attachments, msg.options);
     if (msg.type === "approval") bridge.approval(msg.request, msg.decision);
     if (msg.type === "stop") bridge.stop();
@@ -1485,14 +1717,34 @@ async function main() {
         productMode,
         stablePublicUrl: stablePublicUrl || null,
         publicTunnelEnabled,
+        connectionMode: currentConnectionMode,
+        currentAccessUrl: currentAccessUrl || null,
       });
+      return;
+    }
+    if (url.pathname === "/api/connection-center") {
+      if (!requireToken(url, phoneToken, res)) return;
+      sendJson(res, 200, connectionCenterPayload(phoneToken));
       return;
     }
     if (url.pathname === "/api/device/register") {
       if (!requireToken(url, phoneToken, res)) return;
       try {
         const body = req.method === "POST" ? await readRequestJson(req) : {};
-        const device = store.ensureDevice(body.deviceId || url.searchParams.get("device") || "");
+        const deviceId = body.deviceId || url.searchParams.get("device") || "";
+        const existing = store.ensureDevice(deviceId);
+        const device = store.touchDevice(existing.id, {
+          deviceName: String(body.deviceName || existing.deviceName || "").trim(),
+          userAgent: String(body.userAgent || existing.userAgent || req.headers["user-agent"] || "").trim(),
+          lastPublicUrl: String(body.lastPublicUrl || existing.lastPublicUrl || currentPublicUrl || "").trim(),
+          preferredModel: String(body.preferredModel || existing.preferredModel || "").trim(),
+          reasoning: String(body.reasoning || existing.reasoning || "").trim(),
+          speed: String(body.speed || existing.speed || "").trim(),
+          accessMode: String(body.accessMode || existing.accessMode || "").trim(),
+          theme: String(body.theme || existing.theme || "").trim(),
+          lastThreadId: String(body.lastThread || existing.lastThreadId || existing.lastSessionId || "").trim(),
+        });
+        refreshConnectionArtifacts(phoneToken);
         sendJson(res, 200, { device, tokenRequired: true });
       } catch (error) {
         sendJson(res, 400, { error: error.message });
@@ -1512,6 +1764,7 @@ async function main() {
         ...current,
         device: device || current.device,
         pcOnline: true,
+        connection: connectionCenterPayload(phoneToken),
         live: liveBridge
           ? {
               threadId: liveBridge.threadId,
@@ -1534,7 +1787,19 @@ async function main() {
           archived: false,
           useStateDbOnly: false,
         });
-        sendJson(res, 200, result);
+        const activeThreadIds = new Set(
+          Array.from(bridges.values())
+            .filter((bridge) => bridge.threadId && (bridge.activeTurnId || bridge.hasPendingTurnStart()))
+            .map((bridge) => bridge.threadId),
+        );
+        const data = Array.isArray(result.data)
+          ? result.data.map((thread) => ({
+              ...thread,
+              active: Boolean(thread.active || activeThreadIds.has(thread.id)),
+              live: Boolean(thread.live || activeThreadIds.has(thread.id)),
+            }))
+          : result.data;
+        sendJson(res, 200, { ...result, data });
       } catch (error) {
         sendJson(res, 500, { error: error.message });
       }
@@ -1602,6 +1867,7 @@ async function main() {
         bridges: Array.from(bridges.values()).map((bridge) => ({
           threadId: bridge.threadId,
           clients: bridge.clients.size,
+          devices: bridge.connectedDevices ? bridge.connectedDevices() : [],
           ready: bridge.ready,
           active: Boolean(bridge.activeTurnId || bridge.hasPendingTurnStart()),
           queued: bridge.turnQueue.length,
@@ -1936,8 +2202,18 @@ async function main() {
     }
     const threadId = url.searchParams.get("thread") || null;
     const deviceId = url.searchParams.get("device") || "";
+    const deviceInfo = {
+      deviceName: String(url.searchParams.get("deviceName") || "").trim(),
+      userAgent: String(req.headers["user-agent"] || ""),
+      lastPublicUrl: String(url.searchParams.get("origin") || "").trim(),
+      preferredModel: String(url.searchParams.get("model") || "").trim(),
+      reasoning: String(url.searchParams.get("reasoning") || "").trim(),
+      speed: String(url.searchParams.get("speed") || "").trim(),
+      accessMode: String(url.searchParams.get("accessMode") || "").trim(),
+      theme: String(url.searchParams.get("theme") || "").trim(),
+    };
     if (deviceId) store.ensureDevice(deviceId);
-    wss.handleUpgrade(req, socket, head, (ws) => bindBrowser(ws, phoneToken, threadId, deviceId));
+    wss.handleUpgrade(req, socket, head, (ws) => bindBrowser(ws, phoneToken, threadId, deviceId, deviceInfo));
   });
 
   server.listen(uiPort, bindHost, () => {

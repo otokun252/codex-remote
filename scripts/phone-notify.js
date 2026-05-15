@@ -45,15 +45,19 @@ function notificationTimeoutMs(env = process.env) {
   return Number.isFinite(value) && value > 0 ? value : 5000;
 }
 
-function notificationMessage(urls) {
+function notificationMessage(urls, options = {}) {
+  const title = options.title || "Codex phone bridge is ready.";
+  const footer = options.footer || "Open this URL from your phone.";
   const visibleUrls = urls.length ? urls : ["No public access URL is ready yet. Check the bridge console on the host."];
   return [
-    "Codex phone bridge is ready.",
+    title,
     "",
+    options.body || "",
+    options.body ? "" : "",
     ...visibleUrls,
     "",
-    "Open this URL from your phone.",
-  ].join("\n");
+    footer,
+  ].filter((line, index, rows) => !(line === "" && rows[index - 1] === "")).join("\n");
 }
 
 async function fetchWithTimeout(fetchImpl, url, options, timeoutMs) {
@@ -73,8 +77,12 @@ function ntfyEndpoint(target) {
 }
 
 async function postNtfy(target, urls, fetchImpl, timeoutMs) {
+  return postNtfyMessage(target, urls, {}, fetchImpl, timeoutMs);
+}
+
+async function postNtfyMessage(target, urls, options, fetchImpl, timeoutMs) {
   const headers = {
-    title: "Codex phone bridge ready",
+    title: options.pushTitle || "Codex phone bridge ready",
     tags: "computer,phone",
   };
   if (urls[0]) headers.click = urls[0];
@@ -82,21 +90,25 @@ async function postNtfy(target, urls, fetchImpl, timeoutMs) {
   const response = await fetchWithTimeout(fetchImpl, ntfyEndpoint(target), {
     method: "POST",
     headers,
-    body: notificationMessage(urls),
+    body: notificationMessage(urls, options),
   }, timeoutMs);
   if (!response.ok) throw new Error(`ntfy returned HTTP ${response.status}`);
 }
 
 async function postPushover(target, urls, fetchImpl, timeoutMs) {
+  return postPushoverMessage(target, urls, {}, fetchImpl, timeoutMs);
+}
+
+async function postPushoverMessage(target, urls, options, fetchImpl, timeoutMs) {
   const form = new URLSearchParams({
     token: target.token,
     user: target.user,
-    title: "Codex phone bridge ready",
-    message: notificationMessage(urls),
+    title: options.pushTitle || "Codex phone bridge ready",
+    message: notificationMessage(urls, options),
   });
   if (urls[0]) {
     form.set("url", urls[0]);
-    form.set("url_title", "Open Codex phone bridge");
+    form.set("url_title", options.pushUrlTitle || "Open Codex phone bridge");
   }
   if (target.device) form.set("device", target.device);
   const response = await fetchWithTimeout(fetchImpl, "https://api.pushover.net/1/messages.json", {
@@ -116,11 +128,15 @@ function discordEndpoint(target) {
 }
 
 async function postDiscord(target, urls, fetchImpl, timeoutMs) {
+  return postDiscordMessage(target, urls, {}, fetchImpl, timeoutMs);
+}
+
+async function postDiscordMessage(target, urls, options, fetchImpl, timeoutMs) {
   const response = await fetchWithTimeout(fetchImpl, discordEndpoint(target), {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      content: notificationMessage(urls),
+      content: notificationMessage(urls, options),
       allowed_mentions: { parse: [] },
     }),
   }, timeoutMs);
@@ -148,9 +164,32 @@ async function notifyBridgeUrls(urls, options = {}) {
   return results;
 }
 
+async function notifyPhoneEvent(options = {}) {
+  const env = options.env || process.env;
+  const fetchImpl = options.fetch || fetch;
+  const targets = notificationTargets(env);
+  const timeoutMs = notificationTimeoutMs(env);
+  const urls = Array.isArray(options.urls) ? options.urls.filter(Boolean) : [];
+  const results = [];
+
+  for (const target of targets) {
+    try {
+      if (target.type === "ntfy") await postNtfyMessage(target, urls, options, fetchImpl, timeoutMs);
+      if (target.type === "pushover") await postPushoverMessage(target, urls, options, fetchImpl, timeoutMs);
+      if (target.type === "discord") await postDiscordMessage(target, urls, options, fetchImpl, timeoutMs);
+      results.push({ type: target.type, ok: true });
+    } catch (error) {
+      results.push({ type: target.type, ok: false, error: error.message });
+    }
+  }
+
+  return results;
+}
+
 module.exports = {
   notificationMessage,
   notificationTargets,
   notificationTimeoutMs,
   notifyBridgeUrls,
+  notifyPhoneEvent,
 };
