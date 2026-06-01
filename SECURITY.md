@@ -9,6 +9,20 @@ This repository is an experimental local lab. The supported security posture is:
 - treat `.phone-token`, `.uploads/`, `.codex-home*/`, and generated session databases as local-only state
 - treat startup notification credentials and tokenized URL messages as private local state
 
+## Why Codex Security Matters Here
+
+Codex Remote deliberately sits near sensitive boundaries: a phone-accessible UI, a local Codex process, local files, browser automation, screenshots, generated artifacts, and optional public tunnel access. A mistake in authentication, token handling, file path validation, browser-control boundaries, or log redaction could expose a user's local machine or private work.
+
+Codex Security is useful for this project because reviews can focus on:
+
+- token validation and token rotation flows
+- Cloudflare Tunnel or fixed-public-URL access control
+- local file browsing and artifact serving boundaries
+- browser automation permissions and command injection risks
+- screenshot, upload, and media preview handling
+- accidental leakage of tokens, local paths, logs, profile names, or screenshots
+- safe defaults for individual users running the bridge from their own PCs
+
 ## Reporting
 
 If you find a security issue, open a private advisory or contact the repository owner before publishing details.

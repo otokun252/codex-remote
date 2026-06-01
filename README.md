@@ -1,5 +1,11 @@
 ﻿# Codex Remote
 
+Codex Remote is a local-first mobile control surface for Codex on a user's own PC.
+
+It lets a phone act as the remote UI while Codex execution, local files, browser sessions, screenshots, generated artifacts, and credentials stay on the user's Windows machine. The project focuses on practical remote operation: QR pairing, PWA use, Cloudflare Tunnel access, local long-term memory workflows, artifact review, and mobile-friendly task handoff.
+
+This is intended for individual developers and small teams who want to keep Codex running on a trusted desktop environment while monitoring and steering work from a phone.
+
 Codex CLIの `codex remote-control` を、スマホから扱いやすくするためのリポジトリです。
 
 スマホから、自分のPCで動いているCodexを操作するためのWebアプリです。
@@ -31,6 +37,12 @@ Codex CLIの `codex remote-control` を、スマホから扱いやすくする�
 ```
 
 `start.bat` はCloudflare Quick Tunnelを使い、外から使えるURLだけを表示します。
+
+## Why This Matters for Codex OSS
+
+Codex Remote explores an operational layer around Codex: keeping the agent close to local files and desktop tools while making it reachable from a phone. That creates a useful workflow for long-running tasks, field checks, approvals, generated artifact review, and small-business automation without moving private files or browser profiles to a hosted service.
+
+The security boundary is central to the design: the bridge is local-first, external access is token-protected, and private runtime files are excluded from Git.
 
 ## 必要なもの
 
